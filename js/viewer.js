@@ -62,23 +62,22 @@ export class Viewer {
     const shape = new THREE.Shape(); const h = s / 2, rr = s * 0.06;
     shape.moveTo(-h + rr, -h); shape.lineTo(h - rr, -h); shape.quadraticCurveTo(h, -h, h, -h + rr); shape.lineTo(h, h - rr);
     shape.quadraticCurveTo(h, h, h - rr, h); shape.lineTo(-h + rr, h); shape.quadraticCurveTo(-h, h, -h, h - rr); shape.lineTo(-h, -h + rr); shape.quadraticCurveTo(-h, -h, -h + rr, -h);
-    const plate = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: 0xfbfaf6, transparent: true, premultipliedAlpha: true, opacity: 0.85 }));
+    const plate = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: 0xe5e1d8 }) /* 打印板稍深一点，白色的纱层 / 浅色模型才看得清 */);
     plate.position.z = -0.4; this.plate.add(plate);
     const pts = [];
     for (let x = -h + 10; x < h - 0.1; x += 10) pts.push(x, -h + 4, 0, x, h - 4, 0);
     for (let y = -h + 10; y < h - 0.1; y += 10) pts.push(-h + 4, y, 0, h - 4, y, 0);
     const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xe6e1d6 }));
+    const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xd3cec4 }));
     lines.position.z = -0.3; this.plate.add(lines);
   }
   /** parts: [{geo, label}]；fit=true 时把镜头对准模型 */
   setParts(parts, fit) {
     this.group.clear();
-    this.glass ||= new THREE.MeshPhysicalMaterial({ color: 0xf6f3ff, transparent: true, premultipliedAlpha: true, opacity: 0.5, roughness: 0.25, depthWrite: false, side: THREE.DoubleSide });
     this.colorMats ||= new Map();
     const matFor = hex => { if (!this.colorMats.has(hex)) this.colorMats.set(hex, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0 })); return this.colorMats.get(hex); };
     parts.forEach((p, i) => {
-      const mesh = new THREE.Mesh(p.geo, p.translucent ? this.glass : p.color ? matFor(p.color) : this.mats[p.keepPlace && i > 0 ? 1 : 0]);
+      const mesh = new THREE.Mesh(p.geo, p.color ? matFor(p.color) : this.mats[(p.second || p.translucent || (p.keepPlace && i > 0)) ? 1 : 0]);
       if (p.offset) mesh.position.set(...p.offset); // 只影响预览（比如“分开查看”）
       this.group.add(mesh);
     });
@@ -139,9 +138,9 @@ export class Thumbnailer {
     this.group.clear();
     this.scene.background = new THREE.Color(bg); // 不透明背景：缩略图不会出现透明度错误的杂点
     const mat = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.5, metalness: 0 });
-    const glass = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, premultipliedAlpha: true, opacity: 0.55, roughness: 0.25, depthWrite: false, side: THREE.DoubleSide });
+    const glass = new THREE.MeshStandardMaterial({ color: 0xf7f4ee, roughness: 0.55 }); // 第二色（纱层等）在缩略图里用白色
     const alt = new THREE.MeshStandardMaterial({ color: new THREE.Color(hex).offsetHSL(0, -0.1, 0.18), roughness: 0.5 });
-    parts.forEach((p, i) => this.group.add(new THREE.Mesh(p.geo, p.translucent ? glass : (p.keepPlace && i > 0 ? alt : mat))));
+    parts.forEach((p, i) => this.group.add(new THREE.Mesh(p.geo, (p.second || p.translucent) ? glass : (p.keepPlace && i > 0 ? alt : mat))));
     const box = new THREE.Box3().setFromObject(this.group);
     const ctr = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
     this.shadow.position.set(ctr.x, ctr.y, 0.02); this.shadow.scale.set(s.x * 1.5 + 8, s.y * 1.5 + 8, 1);

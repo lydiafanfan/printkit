@@ -1,12 +1,12 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=12';
-import { TOOLS } from './tools.js?v=12';
-import { SAMPLES } from './samples.js?v=12';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=12';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=12';
-import { getFit, setFit } from './parts.js?v=12';
-import { export3MF } from './export3mf.js?v=12';
+import { Viewer, Thumbnailer } from './viewer.js?v=14';
+import { TOOLS } from './tools.js?v=14';
+import { SAMPLES } from './samples.js?v=14';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=14';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=14';
+import { getFit, setFit } from './parts.js?v=14';
+import { export3MF } from './export3mf.js?v=14';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -32,7 +32,8 @@ const ICONS = {
   tolerance: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="10" rx="2"/><circle cx="7" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.9"/><circle cx="17" cy="12" r="2.4"/></svg>',
   framestudio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M7 15l3-3 2 2 2-1.5 3 2.5"/></svg>',
 };
-const COLORS = [['#8fd3c1', '薄荷'], ['#f4c6b8', '蜜桃'], ['#f3dc9b', '奶油'], ['#a9bde6', '雾蓝'], ['#d9d6cf', '灰白']];
+const PALETTE = [['#8fd3c1', '薄荷'], ['#f4c6b8', '蜜桃'], ['#f3dc9b', '奶油'], ['#a9bde6', '雾蓝'], ['#f7f4ee', '白色'], ['#d9d6cf', '灰白'], ['#9aa0a6', '灰色'], ['#2f2f33', '黑色'],
+  ['#e0534a', '红色'], ['#f28c38', '橙色'], ['#f2c94c', '黄色'], ['#5aa469', '绿色'], ['#3d7bd9', '蓝色'], ['#8e6bbf', '紫色'], ['#f29bb5', '粉色'], ['#8b5e3c', '棕色']];
 const FONTS = [
   ['"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif', '黑体'],
   ['"Songti SC","STSong","SimSun",serif', '宋体'],
@@ -75,14 +76,28 @@ async function loadSample(id) {
 
 // ---------- 3D 预览 ----------
 const viewer = new Viewer($('#viewport'));
-viewer.setColor(COLORS[S.color][0]);
-$('#swatches').innerHTML = COLORS.map(([c, n], i) => `<button style="background:${c}" title="${n}" data-color="${i}" class="${i === S.color ? 'on' : ''}"></button>`).join('');
-$('#swatches').addEventListener('click', e => {
-  const b = e.target.closest('[data-color]'); if (!b) return;
-  S.color = +b.dataset.color; LS.set('color', S.color);
-  viewer.setColor(COLORS[S.color][0]);
-  document.querySelectorAll('#swatches button').forEach(x => x.classList.toggle('on', x === b));
-});
+// ---------- 颜色面板（主色 + 第二色） ----------
+S.c1 = LS.get('c1', '#8fd3c1');
+S.c2 = LS.get('c2', '#f7f4ee');
+const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+function renderPalette() {
+  document.querySelectorAll('.cp-grid').forEach(g => {
+    const slot = g.dataset.slot, cur = S[slot], custom = !PALETTE.some(([c]) => same(c, cur));
+    g.innerHTML = PALETTE.map(([c, n]) => `<button style="--c:${c}" title="${n}" data-slot="${slot}" data-c="${c}" class="${same(c, cur) ? 'on' : ''}"></button>`).join('')
+      + `<label class="cp-custom ${custom ? 'on' : ''}" title="自定义颜色" style="${custom ? `--c:${cur}` : ''}"><input type="color" data-slot="${slot}" value="${cur}"><span>${custom ? '' : '+'}</span></label>`;
+  });
+}
+function applyColors() {
+  viewer.setColor(S.c1, S.c2);
+  $('#cpDot1').style.background = S.c1; $('#cpDot2').style.background = S.c2;
+}
+function setSlot(slot, c) { S[slot] = c; LS.set(slot, c); applyColors(); }
+applyColors(); renderPalette();
+$('#cpBtn').addEventListener('click', e => { e.stopPropagation(); const pop = $('#cpPop'); pop.hidden = !pop.hidden; $('#cpBtn').setAttribute('aria-expanded', !pop.hidden); if (!pop.hidden) renderPalette(); });
+$('#cpPop').addEventListener('click', e => { e.stopPropagation(); const b = e.target.closest('button[data-c]'); if (b) { setSlot(b.dataset.slot, b.dataset.c); renderPalette(); } });
+$('#cpPop').addEventListener('input', e => { if (e.target.type === 'color') { setSlot(e.target.dataset.slot, e.target.value); const l = e.target.closest('.cp-custom'); l.style.setProperty('--c', e.target.value); } });
+$('#cpPop').addEventListener('change', e => { if (e.target.type === 'color') renderPalette(); });
+addEventListener('click', e => { if (!e.target.closest('.color-pick')) { $('#cpPop').hidden = true; $('#cpBtn').setAttribute('aria-expanded', false); } });
 $('#viewReset').onclick = () => viewer.frame();
 $('#viewFlip').onclick = () => { viewer.flip(); $('#viewFlip').classList.toggle('on', viewer.flipped); };
 window.printkit = { viewer, S }; // 方便调试
@@ -135,7 +150,7 @@ $('#scrim').addEventListener('click', closeSide);
 $('#sideNav').addEventListener('click', e => { if (e.target.closest('a')) closeSide(); });
 
 // ---------- 首页 ----------
-const THUMB_V = 'thumb.v7.';
+const THUMB_V = 'thumb.v9.';
 const TILE_BG = { 'var(--t-mint)': '#dcf1e9', 'var(--t-peach)': '#fde4d8', 'var(--t-butter)': '#faefcc', 'var(--t-lilac)': '#ebe6fb', 'var(--t-sky)': '#dfecf8', 'var(--t-rose)': '#fbe1e9', 'var(--t-sand)': '#eee8de' };
 function renderHome() {
   const card = t => {
@@ -585,8 +600,7 @@ function renderFmt() {
 renderFmt();
 $('#fmtSeg').addEventListener('click', e => { const b = e.target.closest('[data-fmt]'); if (!b) return; S.fmt = b.dataset.fmt; LS.set('fmt', S.fmt); renderFmt(); });
 function partColors() {
-  const base = new THREE.Color(COLORS[S.color][0]);
-  return S.parts.map((p, i) => p.translucent ? '#F2F2F2' : p.keepPlace && i > 0 ? '#' + base.clone().offsetHSL(0.45, 0, -0.1).getHexString() : '#' + base.getHexString());
+  return S.parts.map((p, i) => p.color || ((p.second || p.translucent || (p.keepPlace && i > 0)) ? S.c2 : S.c1));
 }
 $('#download').addEventListener('click', () => {
   if (!S.parts.length) return;

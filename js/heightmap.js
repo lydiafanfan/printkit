@@ -3,7 +3,7 @@
  * 白色 = 最高，灰色 = 次高 …… 黑色 / 透明 = 空。
  * 图中间被实体包围的最大空区域 = 相片窗口。
  */
-import { Art } from './engine.js?v=12';
+import { Art } from './engine.js?v=14';
 
 // ---------- 旋转 ----------
 const rotCache = new WeakMap();

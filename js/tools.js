@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=12';
-import { PARTS, getFit } from './parts.js?v=12';
-import { JOINER } from './joiner.js?v=12';
-import { PARTS2 } from './parts2.js?v=12';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=12';
+import { FRAME_STUDIO } from './framestudio.js?v=14';
+import { PARTS, getFit } from './parts.js?v=14';
+import { JOINER } from './joiner.js?v=14';
+import { PARTS2 } from './parts2.js?v=14';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=14';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -261,26 +261,59 @@ export const TOOLS = [
     ],
     build(art, img, p) {
       const { sp, f } = placeArt(art, img, p.size, 3);
-      const sil = fillHoles(sp, f);
+      let sil = fillHoles(sp, f), lines = f, bridged = 0;
+      const count = g => { let n = 0; for (let i = 0; i < g.length; i++) if (g[i] >= 0.5) n++; return n; };
+      const nf = count(f);
+      const base0 = count(sil);
+      if (base0 < nf * 1.3) {
+        // 线条几乎没围出区域 = 外圈有缺口：线条“膨胀—填满—收回”（闭运算）把缺口补上；面积明显变大才算真的补上了
+        const need = Math.max(nf * 1.3, base0 * 1.6);
+        {
+          for (const r of [0.6, 1.2, 2, 3, 4.5, 6, 8, 11, 15]) {
+            const closed = erode(sp, fillHoles(sp, dilate(sp, f, r)), r);
+            if (count(closed) >= need) { sil = F.union(closed, f); bridged = r; break; }
+          }
+          if (!bridged) {
+            // 缺口太大：按整体外形（凸包）补齐
+            const pts = [];
+            for (let y = 0; y < sp.h; y += 2) for (let x = 0; x < sp.w; x += 2) if (f[y * sp.w + x] >= 0.5) pts.push(sp.mm(x, y));
+            const hull = convexHull(pts);
+            if (hull.length >= 3) {
+              const hf = sp.draw(c => { c.beginPath(); hull.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); });
+              if (count(hf) >= need) { sil = F.union(hf, f); bridged = -1; }
+            }
+          }
+        }
+        if (bridged) {
+          // 在补上的缺口处也补一段线，让外圈完整
+          const df = distInside(sp, f), vals = [];
+          for (let i = 0; i < df.length; i++) if (df[i] > 0) vals.push(df[i]);
+          vals.sort((x, y) => x - y);
+          const w = Math.max(0.8, vals.length ? 2 * vals[Math.floor(vals.length * 0.9)] : 1);
+          lines = F.union(f, F.sub(sil, erode(sp, sil, w)));
+        }
+      }
       // 纱层只在图案的外轮廓以内，不会超出主体
       const gauze = p.inset > 0 ? F.inter(erode(sp, sil, p.inset), sil) : sil;
       let a = 0, b = 0;
-      for (let i = 0; i < f.length; i++) { if (f[i] >= 0.5) a++; if (gauze[i] >= 0.5) b++; }
+      for (let i = 0; i < lines.length; i++) { if (lines[i] >= 0.5) a++; if (gauze[i] >= 0.5) b++; }
       const warnings = [];
-      if (b < a * 1.15) warnings.push('线稿的外轮廓好像没有闭合，纱层填不进去。请确认最外圈线条是连起来的，或在“图像调整”里把线条加粗一点。');
+      if (b < a * 1.15) warnings.push('这张图的线条围不出一个区域（像一条单独的线），纱层没法铺。仿欧根纱适合有外轮廓的线稿。');
       const top = p.gauze + p.lineH;
       // 线条已经把整个轮廓盖满时（比如实心的字），就没有单独的纱层
-      const gauzeGeo = buildSolid(sp, [{ f: F.sub(gauze, f), z0: 0, z1: p.gauze }]);
+      const gauzeGeo = buildSolid(sp, [{ f: F.sub(gauze, lines), z0: 0, z1: p.gauze }]);
       if (!gauzeGeo) warnings.push('这张图的线条把整个轮廓都盖满了，没有露出纱的地方。仿欧根纱适合“线框”式的线稿；实心图案可以用“线稿加厚”。');
       return {
         // 拆成两个零件：线条 + 纱层（不重叠），方便多色打印机分别指定耗材
         parts: [
-          { ...solid(sp, [{ f, z0: 0, z1: top }], '线条'), keepPlace: true },
-          ...(gauzeGeo ? [{ geo: gauzeGeo, label: '纱层', keepPlace: true, translucent: true }] : []),
+          { ...solid(sp, [{ f: lines, z0: 0, z1: top }], '线条'), keepPlace: true },
+          ...(gauzeGeo ? [{ geo: gauzeGeo, label: '纱层', keepPlace: true, second: true }] : []),
         ],
         warnings,
+        ...(bridged ? { bridged } : {}),
         notes: [
-          '纱层用半透明或透明耗材效果最好（透明 PETG / 透明 PLA），线条可以换一个颜色。',
+          ...(bridged > 0 ? [`外圈有缺口，已经自动补上（缺口大约 ${r1(bridged * 2)}mm 以内），补的地方也加了一段线。`] : bridged < 0 ? ['外圈缺口比较大，已经按整体外形补齐，补的地方也加了一段线。'] : []),
+          '纱层用半透明或透明耗材打印效果最好（透明 PETG / 透明 PLA）；预览里用“第二颜色”显示，方便看清。',
           '导出 3MF 后，“线条”和“纱层”是两个零件，在 Bambu Studio 里分别选 AMS 耗材就行；没有 AMS 就在纱层高度暂停换料。',
           '首层要慢一点、调平要好；纱层只有一两层，建议首层层高和“纱层厚度”一致。',
           '线条宽度最好 ≥ 0.8mm（两条挤出线），太细的话在“图像调整 → 线条加粗”里加粗。',
@@ -356,6 +389,17 @@ function mergeGeos(list) {
   let k = 0; for (const g of list) { pos.set(g.attributes.position.array, k); k += g.attributes.position.array.length; g.dispose(); }
   const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.computeVertexNormals();
   return out;
+}
+
+/** 二维凸包（Andrew 单调链） */
+function convexHull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
 }
 
 /** 印章手柄：底面是平的，上面一个圆头 */
