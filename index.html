@@ -6,15 +6,12 @@
   <title>打印助手</title>
   <meta name="theme-color" content="#f7f6f3">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
     }
   }
   </script>
@@ -87,6 +84,16 @@
 <dialog id="modal" class="modal"></dialog>
 <input type="file" id="fileIn" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp" hidden>
 <div class="drop-veil" id="dropVeil"><div>松开鼠标，用这张图</div></div>
-<script type="module" src="js/app.js?v=8"></script>
+<div id="bootFail" class="boot-fail" hidden>
+  <b>页面没能加载出来</b>
+  <p id="bootWhy">程序脚本没有运行。常见原因：浏览器插件（广告拦截、隐私保护）拦截了脚本，或者浏览器版本太旧。</p>
+  <p>可以试试：① 刷新页面 ② 关掉这个网站的广告拦截 / 跟踪防护 ③ 换用最新版 Chrome、Edge 或 Safari。</p>
+</div>
+<script>
+  // 兜底：程序 10 秒内没启动，就显示原因，而不是一片空白
+  window.addEventListener('error', function (e) { var w = document.getElementById('bootWhy'); if (w && !window.printkit) w.textContent = '出错信息：' + (e.message || (e.target && (e.target.src || e.target.href)) || '未知'); }, true);
+  setTimeout(function () { if (!window.printkit) document.getElementById('bootFail').hidden = false; }, 10000);
+</script>
+<script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>

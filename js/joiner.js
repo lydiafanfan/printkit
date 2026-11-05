@@ -11,7 +11,7 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { Space, F, distInside } from './engine.js';
 import { getFit } from './parts.js';
 
-const MANIFOLD_URL = 'https://cdn.jsdelivr.net/npm/manifold-3d@3.5.4/manifold.js';
+const MANIFOLD_URL = new URL('../vendor/manifold/manifold.js', import.meta.url).href; // 自带一份，不依赖外部 CDN
 let W = null;
 export async function manifoldReady() {
   if (!W) { const { default: Module } = await import(MANIFOLD_URL); W = await Module(); W.setup(); }

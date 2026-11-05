@@ -45,8 +45,9 @@ python3 -m http.server 5174
 ## 技术
 
 - 纯静态网页，没有构建步骤：HTML + CSS + 原生 JavaScript 模块
-- 3D 预览与导出：[three.js](https://threejs.org) 0.160
-- 实体布尔运算（封闭网格）：[manifold-3d](https://github.com/elalish/manifold) 3.5.4
+- 3D 预览与导出：[three.js](https://threejs.org) 0.160（MIT）
+- 实体布尔运算（封闭网格）：[manifold-3d](https://github.com/elalish/manifold) 3.5.4（Apache-2.0）
+- 这两个库都放在 `vendor/` 里随项目一起发布，网页不依赖任何外部 CDN
 - 线稿 → 轮廓：自己写的光栅 + 距离场 + marching squares（`js/engine.js`）
 
 ## 文件结构

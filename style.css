@@ -361,3 +361,8 @@ details.adv[open] { padding-bottom: 2px; }
 .modal-body ul { padding-left: 18px; margin: 6px 0 10px; }
 .modal-body li { margin: 3px 0; }
 .modal-btns { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+/* 加载失败兜底提示 */
+.boot-fail { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 100; width: min(440px, calc(100vw - 32px)); background: #fff; border-radius: 16px; padding: 20px 22px; box-shadow: var(--sh-3); color: var(--ink2); font-size: 13.5px; }
+.boot-fail b { display: block; color: var(--ink); font-size: 16px; margin-bottom: 6px; }
+.boot-fail p { margin: 6px 0 0; }
