@@ -1,12 +1,12 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=16';
-import { TOOLS } from './tools.js?v=16';
-import { SAMPLES } from './samples.js?v=16';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=16';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=16';
-import { getFit, setFit } from './parts.js?v=16';
-import { export3MF } from './export3mf.js?v=16';
+import { Viewer, Thumbnailer } from './viewer.js?v=17';
+import { TOOLS } from './tools.js?v=17';
+import { SAMPLES } from './samples.js?v=17';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=17';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=17';
+import { getFit, setFit } from './parts.js?v=17';
+import { export3MF } from './export3mf.js?v=17';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -47,7 +47,7 @@ const FONTS = [
 const S = {
   toolId: LS.get('tool', 'stamp'),
   params: LS.get('params', {}),
-  img: LS.get('img', { threshold: 0.5, invert: false, thicken: 0 }),
+  img: { threshold: 0.5, invert: false, thicken: 0, smooth: 0, ...LS.get('img', {}) },
   color: LS.get('color', 0),
   tab: 'sample',
   source: 'sample',          // sample | file | text
@@ -374,6 +374,7 @@ function renderPanel() {
       <div class="fonts">${FONTS.map(([f, n], i) => `<button class="chip ${i === S.font ? 'on' : ''}" data-font="${i}" style="font-family:${esc(f)}">${n}</button>`).join('')}
       <button class="chip ${S.bold ? 'on' : ''}" data-bold style="font-weight:700">粗体</button></div>` : ''}
     ${S.art ? `<div class="current"><div class="thumb">${thumb ? `<img src="${thumb}" alt="">` : ''}</div><div class="meta"><b>${esc(S.art.label)}</b><span>${sourceLabel} · 深色部分变成实体</span></div></div>` : ''}
+    <div data-imgctl>${ctlHTML({ k: 'smooth', label: '平滑边缘', hint: '边缘毛躁、有锯齿时调大；太大会让细线变细', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' }, S.img)}</div>
     <details class="adv" ${LS.get('advOpen', false) ? 'open' : ''}>
       <summary>图像调整</summary>
       ${ctlHTML({ k: 'threshold', label: '阈值', hint: '越大只保留越深的线条', type: 'range', min: 0.1, max: 0.9, step: 0.05 }, S.img)}
@@ -383,7 +384,7 @@ function renderPanel() {
   $('#panel').innerHTML = sec('art', '图案', artBody) + groupsHTML(t, p) + TIPS_SEC() + FOOT;
 }
 
-const imgKeys = new Set(['threshold', 'thicken', 'invert']);
+const imgKeys = new Set(['threshold', 'thicken', 'invert', 'smooth']);
 function setValue(k, v, inImg) {
   if (inImg) { S.img[k] = v; LS.set('img', S.img); } else setP(k, v);
 }
@@ -402,7 +403,7 @@ $('#panel').addEventListener('input', e => {
   }
   if (k && t.hasAttribute('data-text')) { setP(k, t.value); rebuild(); return; }
   if (!k || t.type === 'checkbox' || t.tagName === 'SELECT') return;
-  const inImg = imgKeys.has(k) && !!t.closest('details.adv');
+  const inImg = imgKeys.has(k) && !!t.closest('details.adv, [data-imgctl]');
   const v = parseFloat(t.value);
   if (!isFinite(v)) return;
   const ctl = t.closest('.ctl');
@@ -421,7 +422,7 @@ $('#panel').addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
   if (t.tagName === 'SELECT' && t.dataset.act) { runAct(t.dataset.act, { key: t.dataset.arg, value: t.value }); return; }
   if (!k) return;
-  const inImg = imgKeys.has(k) && !!t.closest('details.adv');
+  const inImg = imgKeys.has(k) && !!t.closest('details.adv, [data-imgctl]');
   if (t.type === 'checkbox') { setValue(k, t.checked, inImg); if (inImg) updateThumb(); else refreshGroups(); rebuild(); }
   else if (t.tagName === 'SELECT') { setValue(k, t.value, false); refreshGroups(); rebuild(); }
   else if (t.dataset.num) { // 数字框失焦时夹到范围内
@@ -434,8 +435,8 @@ $('#panel').addEventListener('change', e => {
 $('#panel').addEventListener('dblclick', e => {
   const t = e.target;
   if (!t.matches('input[type=range][data-k]')) return;
-  const k = t.dataset.k, inImg = imgKeys.has(k) && !!t.closest('details.adv');
-  const def = inImg ? { threshold: 0.5, thicken: 0, invert: false }[k] : tool().defaults[k];
+  const k = t.dataset.k, inImg = imgKeys.has(k) && !!t.closest('details.adv, [data-imgctl]');
+  const def = inImg ? { threshold: 0.5, thicken: 0, invert: false, smooth: 0 }[k] : tool().defaults[k];
   if (def === undefined) return;
   t.value = def; t.dispatchEvent(new Event('input', { bubbles: true }));
   toast('已恢复默认值');

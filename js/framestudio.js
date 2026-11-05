@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, edgeAlong, buildSolid } from './engine.js?v=16';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=16';
+import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=17';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=17';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -30,7 +30,7 @@ export const FRAME_STUDIO = {
   id: 'framestudio', name: '相框工作室', kind: 'heightmap',
   tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
   defaults: {
-    rotate: 0, invert: false, emptyT: 0.12, hmode: 'levels', levelH: [], maxH: 6, minH: 3,
+    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, tol: 0.2, attach: 'glue',
     keyhole: true, magnet: false, magN: '4', magD: 10, magT: 3, loop: false, loopD: 4,
@@ -42,6 +42,7 @@ export const FRAME_STUDIO = {
       { k: 'levelH', type: 'levels', show: p => p.hmode === 'levels' },
       { k: 'maxH', label: '最亮处高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'minH', label: '最暗处高度', type: 'range', min: 0.6, max: 10, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
+      { k: 'smooth', label: '平滑边缘', hint: '图片边缘毛躁、有锯齿时调大', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' },
       { k: 'emptyT', label: '多暗算“空”', hint: '比这个更暗的地方不出实体', type: 'range', min: 0.02, max: 0.5, step: 0.01 },
       { k: 'invert', label: '反过来（黑色最高）', type: 'toggle' },
       { k: 'rotate', label: '旋转图片', type: 'seg', options: [[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']] },
@@ -139,7 +140,8 @@ export const FRAME_STUDIO = {
     const sp = new Space(cx0 - 4, cy0 - 4 - (p.loop ? 2 * loopR : 0), cx1 + 4, cy1 + 4 + (p.stand ? p.tongueL + 2 : 0), 820);
 
     // ---- 主体（浮雕） ----
-    const b = rasterBright(sp, art, { x: -wcx * s, y: -wcy * s, w: art.w * s, h: art.h * s }, p.invert);
+    const b0 = rasterBright(sp, art, { x: -wcx * s, y: -wcy * s, w: art.w * s, h: art.h * s }, p.invert);
+    const b = p.smooth > 0 ? blurField(sp, b0, p.smooth, false) : b0; // 平滑边缘：亮度图柔化后再分层
     const body = bandField(b, p.emptyT, Infinity);
     const hpx = new Float32Array(b.length);
     for (let i = 0; i < b.length; i++) hpx[i] = hOf(b[i]);

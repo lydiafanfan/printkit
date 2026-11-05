@@ -224,7 +224,37 @@ export function rasterArt(sp, art, rect, img, mirror = false) {
     const t = 0.5 + (v - img.threshold) * 3;
     f[i] = t < 0 ? 0 : t > 1 ? 1 : t;
   }
-  return img.thicken > 0 ? dilate(sp, f, img.thicken / 2) : f;
+  const g = img.smooth > 0 ? blurField(sp, f, img.smooth) : f; // 平滑边缘：先柔化再描边，磨掉毛刺和锯齿
+  return img.thicken > 0 ? dilate(sp, g, img.thicken / 2) : g;
+}
+
+/** 高斯模糊（可分离），sigma 单位毫米。用在“平滑边缘”：模糊后在 0.5 处重新取边界 = 边缘被磨圆 */
+export function blurField(sp, f, sigmaMm, steepen = true) {
+  const s = sigmaMm / sp.res;
+  if (s < 0.35) return f;
+  const r = Math.min(80, Math.ceil(s * 3)), k = new Float32Array(2 * r + 1);
+  let sum = 0;
+  for (let i = -r; i <= r; i++) { k[i + r] = Math.exp(-(i * i) / (2 * s * s)); sum += k[i + r]; }
+  for (let i = 0; i < k.length; i++) k[i] /= sum;
+  const { w, h } = sp, tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let a = 0;
+      for (let i = -r; i <= r; i++) { const xx = x + i < 0 ? 0 : x + i >= w ? w - 1 : x + i; a += f[row + xx] * k[i + r]; }
+      tmp[row + x] = a;
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      let a = 0;
+      for (let i = -r; i <= r; i++) { const yy = y + i < 0 ? 0 : y + i >= h ? h - 1 : y + i; a += tmp[yy * w + x] * k[i + r]; }
+      out[y * w + x] = a;
+    }
+  }
+  // 拉陡一点，让 0.5 附近的过渡保持清晰（描边用插值，不需要很宽的过渡带）
+  if (steepen) for (let i = 0; i < out.length; i++) { const v = 0.5 + (out[i] - 0.5) * 2.5; out[i] = v < 0 ? 0 : v > 1 ? 1 : v; }
+  return out;
 }
 
 const loadImage = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('图片读取失败')); i.src = src; });
