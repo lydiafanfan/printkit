@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=15';
-import { PARTS, getFit } from './parts.js?v=15';
-import { JOINER } from './joiner.js?v=15';
-import { PARTS2 } from './parts2.js?v=15';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=15';
+import { FRAME_STUDIO } from './framestudio.js?v=16';
+import { PARTS, getFit } from './parts.js?v=16';
+import { JOINER } from './joiner.js?v=16';
+import { PARTS2 } from './parts2.js?v=16';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=16';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -32,6 +32,14 @@ const HANDLE_OPTIONS = [
   ['knob', '圆球柄', '最好握 · 费料', HANDLE_ICON('<path d="M6 26h28"/><path d="M14 26q0-4 4-6v-6"/><path d="M26 26q0-4-4-6v-6"/><circle cx="20" cy="9" r="6"/>')],
   ['none', '不要', '直接按', HANDLE_ICON('<path d="M6 26h28"/><path d="M14 12l12 10M26 12L14 22"/>')],
 ];
+
+const ic2 = d => `<svg viewBox="0 0 40 30" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">${d}</svg>`;
+const GAUZE_ICONS = {
+  solid: ic2('<rect x="6" y="5" width="28" height="20" rx="3" fill="currentColor" fill-opacity=".25"/>'),
+  grid: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M13 5v20M20 5v20M27 5v20M6 12h28M6 18h28"/>'),
+  diamond: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M6 13l8-8M6 21l16-16M10 25l20-20M18 25l16-16M26 25l8-8M6 13l12 12M6 5l20 20M14 5l20 20M22 5l12 12"/>'),
+  hex: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M12 10l3-2 3 2v4l-3 2-3-2zM18 10l3-2 3 2v4l-3 2-3-2zM24 10l3-2 3 2v4l-3 2-3-2zM15 16l3-2 3 2v4l-3 2-3-2zM21 16l3-2 3 2v4l-3 2-3-2z"/>'),
+};
 
 // ---------------------------------------------------------------------------
 export const TOOLS = [
@@ -246,7 +254,7 @@ export const TOOLS = [
   // ======================= 仿欧根纱 =======================
   {
     id: 'organza', name: '仿欧根纱', tagline: '底部一层薄纱 + 凸起线条，像刺绣在纱上', sample: 'butterfly',
-    defaults: { size: 60, gauze: 0.2, inset: 0, lineH: 0.6 },
+    defaults: { size: 60, gauze: 0.2, inset: 0, lineH: 0.6, fill: 'solid', meshGap: 2.5, meshW: 0.5 },
     groups: [
       { title: '尺寸', params: [
         { k: 'size', label: '图案大小', hint: '图案最长的一边', type: 'range', min: 15, max: 200, step: 1, unit: 'mm' },
@@ -254,13 +262,23 @@ export const TOOLS = [
       { title: '纱层', params: [
         { k: 'gauze', label: '纱层厚度', hint: '设成 1–2 层的层高，比如 0.2 或 0.4', type: 'range', min: 0.08, max: 0.8, step: 0.02, unit: 'mm' },
         { k: 'inset', label: '纱层内缩', hint: '0 = 刚好填满轮廓；调大让纱藏在线条里面', type: 'range', min: 0, max: 2, step: 0.1, unit: 'mm' },
+        { k: 'fill', label: '纱的样子', type: 'cards', cols: 2, options: [
+          ['solid', '实心纱', '一整片', GAUZE_ICONS.solid],
+          ['grid', '方格网', '规整的小方格', GAUZE_ICONS.grid],
+          ['diamond', '菱形网纱', '像婚纱头纱', GAUZE_ICONS.diamond],
+          ['hex', '六角蕾丝网', '蜂窝状网眼', GAUZE_ICONS.hex],
+        ] },
+        { k: 'meshGap', label: '网眼大小', hint: '网线之间的距离', type: 'range', min: 1, max: 6, step: 0.1, unit: 'mm', show: p => p.fill !== 'solid' },
+        { k: 'meshW', label: '网线粗细', hint: 'P1S 0.4 喷嘴：0.45–0.6 最细又打得出来', type: 'range', min: 0.4, max: 1.2, step: 0.05, unit: 'mm', show: p => p.fill !== 'solid' },
       ] },
       { title: '线条', params: [
         { k: 'lineH', label: '线条高出纱层', type: 'range', min: 0.2, max: 2.4, step: 0.1, unit: 'mm' },
       ] },
     ],
     build(art, img, p) {
-      const { sp, f } = placeArt(art, img, p.size, 3);
+      // 网纱的线很细，用更高的分辨率（每像素 ≤ 网线宽的 1/6）
+      const px = p.fill === 'solid' ? 800 : Math.min(2200, Math.max(800, Math.ceil((p.size + 6) / (p.meshW / 6))));
+      const { sp, f } = placeArt(art, img, p.size, 3, { px });
       let sil = fillHoles(sp, f), lines = f, bridged = 0;
       const count = g => { let n = 0; for (let i = 0; i < g.length; i++) if (g[i] >= 0.5) n++; return n; };
       const nf = count(f);
@@ -301,7 +319,14 @@ export const TOOLS = [
       if (b < a * 1.15) warnings.push('这张图的线条围不出一个区域（像一条单独的线），纱层没法铺。仿欧根纱适合有外轮廓的线稿。');
       const top = p.gauze + p.lineH;
       // 线条已经把整个轮廓盖满时（比如实心的字），就没有单独的纱层
-      const gauzeGeo = buildSolid(sp, [{ f: F.sub(gauze, lines), z0: 0, z1: p.gauze }]);
+      let gauzeF = F.sub(gauze, lines), meshInfo = null;
+      if (p.fill !== 'solid') {
+        // 网纱：图案 ∩ 纱层区域。网线一直延伸到外轮廓线上，所以整片自然连在一起
+        gauzeF = F.sub(F.inter(meshPattern(sp, p.fill, p.meshGap, p.meshW), gauze), lines);
+        meshInfo = connectMesh(sp, lines, gauzeF, gauze, p.meshGap);
+        gauzeF = meshInfo.gauzeF;
+      }
+      const gauzeGeo = buildSolid(sp, [{ f: gauzeF, z0: 0, z1: p.gauze }]);
       if (!gauzeGeo) warnings.push('这张图的线条把整个轮廓都盖满了，没有露出纱的地方。仿欧根纱适合“线框”式的线稿；实心图案可以用“线稿加厚”。');
       return {
         // 拆成两个零件：线条 + 纱层（不重叠），方便多色打印机分别指定耗材
@@ -309,11 +334,15 @@ export const TOOLS = [
           { ...solid(sp, [{ f: lines, z0: 0, z1: top }], '线条'), keepPlace: true },
           ...(gauzeGeo ? [{ geo: gauzeGeo, label: '纱层', keepPlace: true, second: true }] : []),
         ],
-        warnings,
+        warnings: meshInfo && !meshInfo.ok ? [...warnings, `网纱还有 ${meshInfo.loose} 块和主体没连上（打印后会掉下来）。把“网眼大小”调小，或把“网线粗细”调大一点再试试。`] : warnings,
         ...(bridged ? { bridged } : {}),
         notes: [
           ...(bridged > 0 ? [`外圈有缺口，已经自动补上（缺口大约 ${r1(bridged * 2)}mm 以内），补的地方也加了一段线。`] : bridged < 0 ? ['外圈缺口比较大，已经按整体外形补齐，补的地方也加了一段线。'] : []),
           '纱层用半透明或透明耗材打印效果最好（透明 PETG / 透明 PLA）；预览里用“第二颜色”显示，方便看清。',
+          ...(meshInfo ? [
+            `网纱：网眼 ${p.meshGap}mm、网线 ${p.meshW}mm。已检查连通性：${meshInfo.ok ? '线条和网纱连成一整片 ✓' : `还有 ${meshInfo.loose} 块没连上`}${meshInfo.patched ? `；有 ${meshInfo.patched} 处小细节没碰到网线，已在它周围补了一小块实心纱把它连上` : ''}${meshInfo.crumbs ? `；去掉了 ${meshInfo.crumbs} 个单独漂着的网线碎屑` : ''}。`,
+            'Bambu Studio 里打开「质量 → 检测薄壁」，并把「首层线宽」设成和网线粗细差不多（如 0.45），细网线才打得出来；首层速度调慢一点。',
+          ] : []),
           '导出 3MF 后，“线条”和“纱层”是两个零件，在 Bambu Studio 里分别选 AMS 耗材就行；没有 AMS 就在纱层高度暂停换料。',
           '首层要慢一点、调平要好；纱层只有一两层，建议首层层高和“纱层厚度”一致。',
           '线条宽度最好 ≥ 0.8mm（两条挤出线），太细的话在“图像调整 → 线条加粗”里加粗。',
@@ -389,6 +418,81 @@ function mergeGeos(list) {
   let k = 0; for (const g of list) { pos.set(g.attributes.position.array, k); k += g.attributes.position.array.length; g.dispose(); }
   const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.computeVertexNormals();
   return out;
+}
+
+/** 网纱图案（覆盖整个网格范围的细线），之后再和纱层区域取交集 */
+function meshPattern(sp, kind, gap, w) {
+  const x0 = sp.xmin, x1 = sp.xmax, y0 = sp.ymin, y1 = sp.ymax, D = Math.hypot(x1 - x0, y1 - y0);
+  return sp.draw(c => {
+    c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath();
+    if (kind === 'grid') {
+      for (let x = Math.floor(x0 / gap) * gap; x <= x1; x += gap) { c.moveTo(x, y0); c.lineTo(x, y1); }
+      for (let y = Math.floor(y0 / gap) * gap; y <= y1; y += gap) { c.moveTo(x0, y); c.lineTo(x1, y); }
+    } else if (kind === 'diamond') {
+      // 两组斜线（±55°），菱形网眼，和婚纱头纱的网很像
+      for (const a of [55, -55]) {
+        const r = a * Math.PI / 180, dx = Math.cos(r), dy = Math.sin(r), nx = -dy, ny = dx;
+        const step = gap;
+        for (let k = -D; k <= D; k += step) {
+          const cx = (x0 + x1) / 2 + nx * k, cy = (y0 + y1) / 2 + ny * k;
+          c.moveTo(cx - dx * D, cy - dy * D); c.lineTo(cx + dx * D, cy + dy * D);
+        }
+      }
+    } else {
+      // 六角蜂窝：gap 是相邻网眼中心距
+      const R = gap / Math.sqrt(3), hx = gap, hy = 1.5 * R;
+      for (let row = 0, y = y0 - R; y <= y1 + R; row++, y += hy) {
+        for (let x = x0 - gap + (row % 2 ? gap / 2 : 0); x <= x1 + gap; x += hx) {
+          for (let i = 0; i < 6; i++) {
+            const a = Math.PI / 6 + i * Math.PI / 3, b = a + Math.PI / 3;
+            c.moveTo(x + R * Math.cos(a), y + R * Math.sin(a)); c.lineTo(x + R * Math.cos(b), y + R * Math.sin(b));
+          }
+        }
+      }
+    }
+    c.stroke();
+  });
+}
+
+/** 连通性：线条 ∪ 网纱 必须是一整块。没碰到网线的小细节就在周围补一小块实心纱；网线碎屑删掉 */
+function connectMesh(sp, lines, gauzeF, region, gap) {
+  const { w, h } = sp, N = w * h;
+  const label = solid => {
+    const lab = new Int32Array(N), sizes = [0], hasLine = [false], stack = new Int32Array(N);
+    let id = 0;
+    for (let i = 0; i < N; i++) {
+      if (lab[i] || solid[i] < 0.5) continue;
+      id++; let top = 0, n = 0, line = false; stack[top++] = i; lab[i] = id;
+      while (top) {
+        const j = stack[--top], x = j % w; n++; if (lines[j] >= 0.5) line = true;
+        if (x > 0 && !lab[j - 1] && solid[j - 1] >= 0.5) { lab[j - 1] = id; stack[top++] = j - 1; }
+        if (x < w - 1 && !lab[j + 1] && solid[j + 1] >= 0.5) { lab[j + 1] = id; stack[top++] = j + 1; }
+        if (j >= w && !lab[j - w] && solid[j - w] >= 0.5) { lab[j - w] = id; stack[top++] = j - w; }
+        if (j < N - w && !lab[j + w] && solid[j + w] >= 0.5) { lab[j + w] = id; stack[top++] = j + w; }
+      }
+      sizes.push(n); hasLine.push(line);
+    }
+    let main = 1; for (let k = 2; k < sizes.length; k++) if (sizes[k] > sizes[main]) main = k;
+    return { lab, sizes, hasLine, main, count: sizes.length - 1 };
+  };
+  let g = gauzeF, crumbs = 0, patched = 0;
+  let L = label(F.union(lines, g));
+  if (L.count > 1) {
+    g = g.slice();
+    const fixMask = new Float32Array(N);
+    for (let k = 1; k < L.sizes.length; k++) {
+      if (k === L.main) continue;
+      if (!L.hasLine[k]) { for (let i = 0; i < N; i++) if (L.lab[i] === k) g[i] = 0; crumbs++; }      // 只有网线的碎屑：删掉
+      else { for (let i = 0; i < N; i++) if (L.lab[i] === k) fixMask[i] = 1; patched++; }             // 没连上的细节：周围补实心纱
+    }
+    if (patched) {
+      const patch = F.sub(F.inter(dilate(sp, fixMask, gap * 0.9 + 0.6), region), lines);
+      g = F.union(g, patch);
+    }
+    L = label(F.union(lines, g));
+  }
+  return { gauzeF: g, ok: L.count <= 1, loose: Math.max(0, L.count - 1), patched, crumbs };
 }
 
 /** 二维凸包（Andrew 单调链） */
