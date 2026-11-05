@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=11';
-import { PARTS, getFit } from './parts.js?v=11';
-import { JOINER } from './joiner.js?v=11';
-import { PARTS2 } from './parts2.js?v=11';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=11';
+import { FRAME_STUDIO } from './framestudio.js?v=12';
+import { PARTS, getFit } from './parts.js?v=12';
+import { JOINER } from './joiner.js?v=12';
+import { PARTS2 } from './parts2.js?v=12';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=12';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -23,12 +23,22 @@ function solid(sp, feats, label) {
   return { geo, label };
 }
 
+
+const HANDLE_ICON = d => `<svg viewBox="0 0 40 30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">${d}</svg>`;
+const HANDLE_OPTIONS = [
+  ['arch', '拱形提手', '最省料', HANDLE_ICON('<path d="M6 26h28"/><path d="M11 26V15a9 9 0 0 1 18 0v11M15 26V15a5 5 0 0 1 10 0v11"/>')],
+  ['fin', '握片', '很省料', HANDLE_ICON('<path d="M6 26h28"/><path d="M12 26V10q0-4 4-4h8q4 0 4 4v16z"/><circle cx="20" cy="14" r="3.5"/>')],
+  ['ring', '指环', '小章好用', HANDLE_ICON('<path d="M6 26h28"/><circle cx="20" cy="12" r="8"/><circle cx="20" cy="12" r="5"/><path d="M17 20v6M23 20v6"/>')],
+  ['knob', '圆球柄', '最好握 · 费料', HANDLE_ICON('<path d="M6 26h28"/><path d="M14 26q0-4 4-6v-6"/><path d="M26 26q0-4-4-6v-6"/><circle cx="20" cy="9" r="6"/>')],
+  ['none', '不要', '直接按', HANDLE_ICON('<path d="M6 26h28"/><path d="M14 12l12 10M26 12L14 22"/>')],
+];
+
 // ---------------------------------------------------------------------------
 export const TOOLS = [
   // ======================= 印章 =======================
   {
     id: 'stamp', name: '印章', tagline: '线稿或文字做成印章，自动镜像', sample: 'daisy',
-    defaults: { size: 35, shape: 'circle', margin: 3, relief: 1.6, base: 4, mirror: true, border: true, borderW: 1.2, handle: true, handleH: 28 },
+    defaults: { size: 35, shape: 'circle', margin: 3, relief: 1.6, base: 4, mirror: true, border: true, borderW: 1.2, handleType: 'arch', handleH: 26 },
     groups: [
       { title: '尺寸', params: [
         { k: 'size', label: '图案大小', hint: '图案最长的一边', type: 'range', min: 10, max: 120, step: 1, unit: 'mm' },
@@ -43,8 +53,10 @@ export const TOOLS = [
         { k: 'mirror', label: '镜像图案', hint: '开着盖出来才是正的', type: 'toggle' },
         { k: 'border', label: '外圈边框', type: 'toggle' },
         { k: 'borderW', label: '边框粗细', type: 'range', min: 0.6, max: 4, step: 0.1, unit: 'mm', show: p => p.border },
-        { k: 'handle', label: '附带手柄', hint: '单独打印，粘在背面', type: 'toggle' },
-        { k: 'handleH', label: '手柄高度', type: 'range', min: 15, max: 60, step: 1, unit: 'mm', show: p => p.handle },
+      ] },
+      { title: '手柄', params: [
+        { k: 'handleType', type: 'cards', cols: 3, options: HANDLE_OPTIONS },
+        { k: 'handleH', label: '手柄高度', type: 'range', min: 12, max: 60, step: 1, unit: 'mm', show: p => p.handleType !== 'none' },
       ] },
     ],
     build(art, img, p) {
@@ -61,14 +73,11 @@ export const TOOLS = [
       const top = p.base + p.relief;
       const feats = [{ f: base, z0: 0, z1: p.base }, { f: F.inter(f, base), z0: p.base, z1: top }];
       if (p.border && p.shape !== 'follow') feats.push({ f: F.sub(base, erode(sp, base, p.borderW)), z0: p.base, z1: top });
-      const parts = [solid(sp, feats, '印章')];
       const notes = [p.mirror ? '图案已经镜像，盖出来是正的。' : '图案没有镜像，盖出来会是反的。', '印面朝上打印，不需要支撑。'];
-      if (p.handle) {
-        const bb = bounds(sp, base);
-        const rb = Math.max(7, Math.min(15, Math.min(bb.w, bb.h) * 0.32));
-        parts.push({ geo: knob(rb, p.handleH), label: '手柄' });
-        notes.push('手柄平的一面朝下单独打印，用 502 胶或 UHU 粘在印章背面中心。');
-      }
+      const hd = makeHandle(p.handleType, sp, base, p.handleH);
+      if (hd) feats.push({ f: hd.recess, z0: 0, z1: 0.8, op: 'sub' });
+      const parts = [solid(sp, feats, '印章')];
+      if (hd) { parts.push({ geo: hd.geo, label: '手柄' }); notes.push(hd.note); }
       return { parts, notes, colorChange: null };
     },
   },
@@ -164,7 +173,7 @@ export const TOOLS = [
   // ======================= 饼干模 =======================
   {
     id: 'cookie', name: '饼干模', tagline: '外轮廓切模 + 带手柄的压花章，像月饼模一样压出内部细节', sample: 'daisy',
-    defaults: { size: 70, height: 14, wall: 1.6, blade: 0.8, bladeH: 3, flange: true, flangeW: 4, flangeT: 1.6, thicken: 0, stamp: true, emboss: 2, plateT: 3, edgeSkip: 0.8, handle: true, handleH: 30 },
+    defaults: { size: 70, height: 14, wall: 1.6, blade: 0.8, bladeH: 3, flange: true, flangeW: 4, flangeT: 1.6, thicken: 0, stamp: true, emboss: 2, plateT: 3, edgeSkip: 0.8, handleType: 'arch', handleH: 26 },
     groups: [
       { title: '尺寸', params: [
         { k: 'size', label: '饼干大小', hint: '最长的一边', type: 'range', min: 25, max: 150, step: 1, unit: 'mm' },
@@ -183,8 +192,10 @@ export const TOOLS = [
         { k: 'emboss', label: '花纹凸起', hint: '压进饼干的深度', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm', show: p => p.stamp },
         { k: 'plateT', label: '章面厚度', type: 'range', min: 2, max: 6, step: 0.2, unit: 'mm', show: p => p.stamp },
         { k: 'edgeSkip', label: '外圈额外留白', hint: '外轮廓那条线会自动去掉，这里是再往里留多少', type: 'range', min: 0, max: 6, step: 0.1, unit: 'mm', show: p => p.stamp },
-        { k: 'handle', label: '附带手柄', hint: '单独打印，粘在章背面的定位凹坑里', type: 'toggle', show: p => p.stamp },
-        { k: 'handleH', label: '手柄高度', type: 'range', min: 18, max: 60, step: 1, unit: 'mm', show: p => p.stamp && p.handle },
+      ] },
+      { title: '压花章手柄', params: [
+        { k: 'handleType', type: 'cards', cols: 3, options: HANDLE_OPTIONS, show: p => p.stamp },
+        { k: 'handleH', label: '手柄高度', type: 'range', min: 12, max: 60, step: 1, unit: 'mm', show: p => p.stamp && p.handleType !== 'none' },
       ] },
     ],
     build(art, img, p) {
@@ -216,17 +227,12 @@ export const TOOLS = [
           warnings.push('这个图案内部没有线条，压花章会是平的，所以没生成。想要细节可以换一个内部有线条的图案，或者把“外圈留白”调小。');
         } else {
           const stampFeats = [{ f: plate, z0: 0, z1: p.plateT }, { f: inner, z0: p.plateT - 0.01, z1: p.plateT + p.emboss }];
-          let rb = 0;
-          if (p.handle) {
-            const bb = bounds(sp, plate);
-            rb = Math.max(7, Math.min(13, Math.min(bb.w, bb.h) * 0.2));
-            const [cx, cy] = centroid(sp, plate);
-            stampFeats.push({ f: sp.circle(cx, cy, rb + 0.25), z0: 0, z1: 0.8, op: 'sub' }); // 背面定位凹坑，手柄对准粘
-          }
+          const hd = makeHandle(p.handleType, sp, plate, p.handleH);
+          if (hd) stampFeats.push({ f: hd.recess, z0: 0, z1: 0.8, op: 'sub' }); // 背面定位槽，手柄插进去粘
           parts.push(solid(sp, stampFeats, '压花章'));
-          if (p.handle) parts.push({ geo: knob(rb, p.handleH), label: '手柄' });
+          if (hd) parts.push({ geo: hd.geo, label: '手柄' });
           notes.push('压花章：花纹朝上打印（背面贴床），不需要支撑。比切模内圈小一圈，可以直接放进切模里往下压。');
-          if (p.handle) notes.push('手柄平的一面朝下单独打印，用食品安全的胶粘进压花章背面的圆形凹坑里。');
+          if (hd) notes.push(hd.note.replace('胶水', '食品安全的胶'));
           notes.push('用法：先用切模切出饼干，切模不拿开，把压花章从上面放进去按一下，细节就压出来了。');
           if (p.emboss > p.size * 0.06) warnings.push('花纹凸起比较高，压得太深饼干可能会裂，可以先压浅一点试试。');
         }
@@ -290,6 +296,67 @@ export const TOOLS = [
   ...PARTS2,
   JOINER,
 ];
+
+/**
+ * 手柄（印章、饼干压花章共用）。除了圆球柄，其它都是平躺打印的薄片，很省料。
+ * 返回：手柄几何、章背面对应的定位槽（覆盖度场）、打印提示。
+ */
+function makeHandle(type, sp, plate, H) {
+  if (!type || type === 'none') return null;
+  const bb = bounds(sp, plate), [cx, cy] = centroid(sp, plate), m = Math.min(bb.w, bb.h);
+  const pathFrom = pts => { const s = new THREE.Shape(); pts.forEach(([x, y], i) => (i ? s.lineTo(x, y) : s.moveTo(x, y))); return s; };
+  const flat = (shape, depth) => { const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 24 }); return g.index ? g.toNonIndexed() : g; };
+  let geo, recess, how;
+  if (type === 'arch') {
+    // ∩ 形：两只脚插进背面的两个小槽
+    const L = Math.max(22, Math.min(m * 0.7, 70)), t = 3.2, w = 8, h = Math.max(12, H), R = Math.min(h, L / 2) * 0.85;
+    const s = new THREE.Shape();
+    s.moveTo(-L / 2, 0); s.lineTo(-L / 2, h - R); s.absarc(-L / 2 + R, h - R, R, Math.PI, Math.PI / 2, true);
+    s.lineTo(L / 2 - R, h); s.absarc(L / 2 - R, h - R, R, Math.PI / 2, 0, true);
+    s.lineTo(L / 2, 0); s.lineTo(L / 2 - t, 0);
+    const r2 = R - t;
+    s.lineTo(L / 2 - t, h - R); if (r2 > 0.5) s.absarc(L / 2 - R, h - R, r2, 0, Math.PI / 2, false);
+    s.lineTo(-L / 2 + R, h - t); if (r2 > 0.5) s.absarc(-L / 2 + R, h - R, r2, Math.PI / 2, Math.PI, false);
+    s.lineTo(-L / 2 + t, 0); s.lineTo(-L / 2, 0);
+    geo = flat(s, w);
+    recess = F.union(sp.rect(cx - L / 2 - 0.2, cy - w / 2 - 0.2, t + 0.4, w + 0.4), sp.rect(cx + L / 2 - t - 0.2, cy - w / 2 - 0.2, t + 0.4, w + 0.4));
+    how = '拱形提手侧躺着打印（平的一面贴床），两只脚插进章背面的两个小槽里，点胶水固定。';
+  } else if (type === 'fin') {
+    const L = Math.max(20, Math.min(m * 0.5, 44)), t = 3, h = Math.max(12, H), r = Math.min(6, L / 3);
+    const s = new THREE.Shape();
+    s.moveTo(-L / 2, 0); s.lineTo(-L / 2, h - r); s.absarc(-L / 2 + r, h - r, r, Math.PI, Math.PI / 2, true);
+    s.lineTo(L / 2 - r, h); s.absarc(L / 2 - r, h - r, r, Math.PI / 2, 0, true); s.lineTo(L / 2, 0); s.lineTo(-L / 2, 0);
+    const hr = Math.min(8.5, L / 2 - 3, (h - 4) / 2.2);
+    if (hr >= 4) { const hole = new THREE.Path(); hole.absarc(0, h * 0.58, hr, 0, Math.PI * 2, true); s.holes.push(hole); }
+    geo = flat(s, t);
+    recess = sp.rect(cx - L / 2 - 0.2, cy - t / 2 - 0.2, L + 0.4, t + 0.4);
+    how = '握片平躺打印，竖着插进章背面的长槽里，点胶水固定。中间的孔可以穿一根手指。';
+  } else if (type === 'ring') {
+    const Ro = 12.5, Ri = 9.5, stem = 8, t = 6, sw = 12;
+    const s = pathFrom([[-sw / 2, 0], [sw / 2, 0], [sw / 2, stem], [-sw / 2, stem]]);
+    const ring = new THREE.Shape(); ring.absarc(0, stem + Ri + 1, Ro, 0, Math.PI * 2, false);
+    const hole = new THREE.Path(); hole.absarc(0, stem + Ri + 1, Ri, 0, Math.PI * 2, true); ring.holes.push(hole);
+    geo = mergeGeos([flat(s, t), flat(ring, t)]);
+    recess = sp.rect(cx - sw / 2 - 0.2, cy - t / 2 - 0.2, sw + 0.4, t + 0.4);
+    how = '指环平躺打印，底部的小方块插进章背面的槽里，点胶水固定；用的时候套在食指上。';
+  } else {
+    const rb = Math.max(7, Math.min(13, m * 0.22));
+    geo = knob(rb, Math.max(15, H));
+    recess = sp.circle(cx, cy, rb + 0.25);
+    how = '圆球柄平底朝下单独打印，粘进章背面的圆形凹坑里。';
+  }
+  // 用料估算（按 PLA 1.24 g/cm³、实心算，实际切片有填充会更少）
+  const g = geo.index ? geo.toNonIndexed() : geo, P = g.attributes.position;
+  let v = 0; for (let i = 0; i < P.count; i += 3) v += P.getX(i) * (P.getY(i + 1) * P.getZ(i + 2) - P.getZ(i + 1) * P.getY(i + 2)) - P.getY(i) * (P.getX(i + 1) * P.getZ(i + 2) - P.getZ(i + 1) * P.getX(i + 2)) + P.getZ(i) * (P.getX(i + 1) * P.getY(i + 2) - P.getY(i + 1) * P.getX(i + 2));
+  const grams = Math.abs(v) / 6 / 1000 * 1.24;
+  return { geo, recess, note: `${how}（手柄最多约 ${grams < 1 ? grams.toFixed(1) : Math.round(grams)} g 耗材）` };
+}
+function mergeGeos(list) {
+  const n = list.reduce((a, g) => a + g.attributes.position.count, 0), pos = new Float32Array(n * 3);
+  let k = 0; for (const g of list) { pos.set(g.attributes.position.array, k); k += g.attributes.position.array.length; g.dispose(); }
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.computeVertexNormals();
+  return out;
+}
 
 /** 印章手柄：底面是平的，上面一个圆头 */
 function knob(rb, H) {
