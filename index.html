@@ -6,7 +6,7 @@
   <title>打印助手</title>
   <meta name="theme-color" content="#f7f6f3">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
   <script type="importmap">
   {
     "imports": {
@@ -46,14 +46,6 @@
           <button class="tb-btn" id="viewTop" data-tip="俯视 · T"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="2.5"/></svg></button>
           <button class="tb-btn" id="viewFlip" data-tip="翻面查看 · R"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M8 7L4 12l4 5"/><path d="M16 7l4 5-4 5"/></svg></button>
         </div>
-        <div class="color-pick">
-          <button class="cp-btn" id="cpBtn" aria-haspopup="true" aria-expanded="false"><span class="cp-dots"><i id="cpDot1"></i><i id="cpDot2"></i></span><span class="cp-lbl">颜色</span><svg class="cp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
-          <div class="cp-pop" id="cpPop" hidden>
-            <div class="cp-sec"><div class="cp-h">主色<small>模型主体</small></div><div class="cp-grid" data-slot="c1"></div></div>
-            <div class="cp-sec"><div class="cp-h">第二色<small>纱层、双色零件、标签文字</small></div><div class="cp-grid" data-slot="c2"></div></div>
-            <p class="cp-note">只改变预览和 3MF 里的颜色标记，实际颜色以你装的耗材为准。</p>
-          </div>
-        </div>
         <div class="dl">
           <div class="fmt" id="fmtSeg" data-tip="3MF：零件分开，Bambu Studio 可直接分色"><button data-fmt="3mf">3MF</button><button data-fmt="stl">STL</button></div>
           <button class="btn-primary" id="download" disabled>
@@ -65,6 +57,14 @@
 
       <div class="work">
         <div class="canvas-wrap">
+          <div class="color-pick" id="colorPick">
+            <button class="cp-btn" id="cpBtn" aria-haspopup="true" aria-expanded="false"><span class="cp-dots"><i id="cpDot1"></i><i id="cpDot2"></i></span><span class="cp-lbl">颜色</span><svg class="cp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+            <div class="cp-pop" id="cpPop" hidden>
+            <div class="cp-sec"><div class="cp-h">主色<small>模型主体</small></div><div class="cp-grid" data-slot="c1"></div></div>
+            <div class="cp-sec"><div class="cp-h">第二色<small>纱层、双色零件、标签文字</small></div><div class="cp-grid" data-slot="c2"></div></div>
+            <p class="cp-note">只改变预览和 3MF 里的颜色标记，实际颜色以你装的耗材为准。</p>
+            </div>
+          </div>
           <div class="viewport" id="viewport">
             <div class="vp-busy" id="busy"><span class="dots"><i></i><i></i><i></i></span>生成中</div>
             <div class="vp-error" id="vpError" hidden></div>
@@ -100,6 +100,6 @@
   window.addEventListener('error', function (e) { var w = document.getElementById('bootWhy'); if (w && !window.printkit) w.textContent = '出错信息：' + (e.message || (e.target && (e.target.src || e.target.href)) || '未知'); }, true);
   setTimeout(function () { if (!window.printkit) document.getElementById('bootFail').hidden = false; }, 10000);
 </script>
-<script type="module" src="js/app.js?v=14"></script>
+<script type="module" src="js/app.js?v=15"></script>
 </body>
 </html>

@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=14';
-import { PARTS, getFit } from './parts.js?v=14';
-import { JOINER } from './joiner.js?v=14';
-import { PARTS2 } from './parts2.js?v=14';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=14';
+import { FRAME_STUDIO } from './framestudio.js?v=15';
+import { PARTS, getFit } from './parts.js?v=15';
+import { JOINER } from './joiner.js?v=15';
+import { PARTS2 } from './parts2.js?v=15';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=15';
 
 const r1 = v => Math.round(v * 10) / 10;
 

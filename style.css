@@ -391,3 +391,17 @@ details.adv[open] { padding-bottom: 2px; }
 @media (max-width: 900px) { .cp-lbl { display: none; } .cp-pop { position: fixed; right: 10px; top: 54px; } }
 .btn-primary { white-space: nowrap; flex: none; }
 @media (max-width: 1180px) { .btn-primary kbd { display: none; } }
+
+/* 颜色按钮放在 3D 画布右下角，面板向上展开 */
+.canvas-wrap { position: relative; }
+.canvas-wrap > .color-pick { position: absolute; right: 24px; bottom: 24px; z-index: 6; }
+.canvas-wrap .cp-btn { background: rgba(255,255,255,.88); backdrop-filter: blur(8px); box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04); }
+.canvas-wrap .cp-pop { top: auto; bottom: calc(100% + 8px); right: 0; }
+.canvas-wrap .cp-chev { transform: rotate(180deg); }
+.canvas-wrap .cp-btn[aria-expanded="true"] .cp-chev { transform: none; }
+.status { right: 128px; }
+@media (max-width: 900px) {
+  .canvas-wrap > .color-pick { right: 20px; bottom: 18px; }
+  .canvas-wrap .cp-pop { position: absolute; top: auto; right: 0; bottom: calc(100% + 8px); }
+  .cp-lbl { display: inline; }
+}
