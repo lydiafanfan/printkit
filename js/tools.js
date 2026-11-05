@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=10';
-import { PARTS } from './parts.js?v=10';
-import { JOINER } from './joiner.js?v=10';
-import { PARTS2 } from './parts2.js?v=10';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid } from './engine.js?v=10';
+import { FRAME_STUDIO } from './framestudio.js?v=11';
+import { PARTS, getFit } from './parts.js?v=11';
+import { JOINER } from './joiner.js?v=11';
+import { PARTS2 } from './parts2.js?v=11';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=11';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -163,27 +163,34 @@ export const TOOLS = [
 
   // ======================= 饼干模 =======================
   {
-    id: 'cookie', name: '饼干模', tagline: '沿着外轮廓做刀刃，也能切黏土', sample: 'star',
-    defaults: { size: 70, height: 14, wall: 1.6, blade: 0.8, bladeH: 3, flange: true, flangeW: 4, flangeT: 1.6, thicken: 0 },
+    id: 'cookie', name: '饼干模', tagline: '外轮廓切模 + 带手柄的压花章，像月饼模一样压出内部细节', sample: 'daisy',
+    defaults: { size: 70, height: 14, wall: 1.6, blade: 0.8, bladeH: 3, flange: true, flangeW: 4, flangeT: 1.6, thicken: 0, stamp: true, emboss: 2, plateT: 3, edgeSkip: 0.8, handle: true, handleH: 30 },
     groups: [
       { title: '尺寸', params: [
         { k: 'size', label: '饼干大小', hint: '最长的一边', type: 'range', min: 25, max: 150, step: 1, unit: 'mm' },
-        { k: 'height', label: '模具高度', type: 'range', min: 8, max: 30, step: 0.5, unit: 'mm' },
+        { k: 'height', label: '切模高度', type: 'range', min: 8, max: 30, step: 0.5, unit: 'mm' },
       ] },
-      { title: '刀刃', params: [
+      { title: '切模刀刃', params: [
         { k: 'wall', label: '壁厚', hint: '至少 2 倍喷嘴直径', type: 'range', min: 0.8, max: 3, step: 0.1, unit: 'mm' },
         { k: 'blade', label: '刀刃厚度', hint: '顶部切面，越薄越锋利', type: 'range', min: 0.4, max: 1.6, step: 0.1, unit: 'mm' },
         { k: 'bladeH', label: '刀刃高度', type: 'range', min: 1, max: 8, step: 0.5, unit: 'mm' },
-      ] },
-      { title: '手扶边', params: [
         { k: 'flange', label: '底部加宽边', hint: '更稳、按起来不疼', type: 'toggle' },
         { k: 'flangeW', label: '加宽', type: 'range', min: 2, max: 10, step: 0.5, unit: 'mm', show: p => p.flange },
-        { k: 'flangeT', label: '厚度', type: 'range', min: 1, max: 4, step: 0.2, unit: 'mm', show: p => p.flange },
+        { k: 'flangeT', label: '加宽边厚度', type: 'range', min: 1, max: 4, step: 0.2, unit: 'mm', show: p => p.flange },
+      ] },
+      { title: '压花章', params: [
+        { k: 'stamp', label: '做压花章', hint: '图案内部的线条做成凸起，切完再压出细节', type: 'toggle' },
+        { k: 'emboss', label: '花纹凸起', hint: '压进饼干的深度', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm', show: p => p.stamp },
+        { k: 'plateT', label: '章面厚度', type: 'range', min: 2, max: 6, step: 0.2, unit: 'mm', show: p => p.stamp },
+        { k: 'edgeSkip', label: '外圈额外留白', hint: '外轮廓那条线会自动去掉，这里是再往里留多少', type: 'range', min: 0, max: 6, step: 0.1, unit: 'mm', show: p => p.stamp },
+        { k: 'handle', label: '附带手柄', hint: '单独打印，粘在章背面的定位凹坑里', type: 'toggle', show: p => p.stamp },
+        { k: 'handleH', label: '手柄高度', type: 'range', min: 18, max: 60, step: 1, unit: 'mm', show: p => p.stamp && p.handle },
       ] },
     ],
     build(art, img, p) {
       const pad = p.wall + p.flangeW + 3;
-      const { sp, f } = placeArt(art, img, p.size, pad);
+      // 切模和压花章用的时候都要翻过来按在面团上，所以图案镜像，压出来的饼干才是正的
+      const { sp, f } = placeArt(art, img, p.size, pad, { mirror: true });
       const sil = fillHoles(sp, f);
       const ring = w => F.sub(dilate(sp, sil, w), sil);
       const feats = [
@@ -191,11 +198,42 @@ export const TOOLS = [
         { f: ring(Math.min(p.blade, p.wall)), z0: p.height - p.bladeH, z1: p.height },
       ];
       if (p.flange) feats.push({ f: ring(p.wall + p.flangeW), z0: 0, z1: p.flangeT });
-      return {
-        parts: [solid(sp, feats, '饼干模')],
-        notes: ['宽边朝下打印，刀刃朝上，不需要支撑。', '接触食物建议用 PLA，并只做短时间使用；用前用后清洗干净。'],
-        colorChange: null,
-      };
+      const parts = [solid(sp, feats, '切模')];
+      const notes = ['切模：宽边朝下打印，刀刃朝上，不需要支撑。'];
+      const warnings = [];
+      if (p.stamp) {
+        const clr = Math.max(0.3, getFit().slide + 0.1);
+        const plate = erode(sp, sil, clr + 0.3);                   // 比切模内圈小一圈，能放进切模里压
+        // 估算线条粗细（线条内部到边缘最远距离的 2 倍），把外轮廓那一整条线去掉
+        const df = distInside(sp, f), vals = [];
+        for (let i = 0; i < df.length; i++) if (df[i] > 0) vals.push(df[i]);
+        vals.sort((a, b) => a - b);
+        const strokeW = vals.length ? 2 * vals[Math.floor(vals.length * 0.95)] : 1;
+        const skip = Math.max(strokeW + 0.4 + p.edgeSkip, clr + 0.8);
+        const inner = F.inter(f, erode(sp, sil, skip));
+        let n = 0; for (let i = 0; i < inner.length; i++) if (inner[i] >= 0.5) n++;
+        if (n * sp.res * sp.res < 2) {
+          warnings.push('这个图案内部没有线条，压花章会是平的，所以没生成。想要细节可以换一个内部有线条的图案，或者把“外圈留白”调小。');
+        } else {
+          const stampFeats = [{ f: plate, z0: 0, z1: p.plateT }, { f: inner, z0: p.plateT - 0.01, z1: p.plateT + p.emboss }];
+          let rb = 0;
+          if (p.handle) {
+            const bb = bounds(sp, plate);
+            rb = Math.max(7, Math.min(13, Math.min(bb.w, bb.h) * 0.2));
+            const [cx, cy] = centroid(sp, plate);
+            stampFeats.push({ f: sp.circle(cx, cy, rb + 0.25), z0: 0, z1: 0.8, op: 'sub' }); // 背面定位凹坑，手柄对准粘
+          }
+          parts.push(solid(sp, stampFeats, '压花章'));
+          if (p.handle) parts.push({ geo: knob(rb, p.handleH), label: '手柄' });
+          notes.push('压花章：花纹朝上打印（背面贴床），不需要支撑。比切模内圈小一圈，可以直接放进切模里往下压。');
+          if (p.handle) notes.push('手柄平的一面朝下单独打印，用食品安全的胶粘进压花章背面的圆形凹坑里。');
+          notes.push('用法：先用切模切出饼干，切模不拿开，把压花章从上面放进去按一下，细节就压出来了。');
+          if (p.emboss > p.size * 0.06) warnings.push('花纹凸起比较高，压得太深饼干可能会裂，可以先压浅一点试试。');
+        }
+      }
+      notes.push('图案已经镜像：切模和压花章翻过来按在面团上时，压出来的饼干是正的。');
+      notes.push('接触食物建议用 PLA，并只做短时间使用；用前用后清洗干净。');
+      return { parts, notes, warnings, colorChange: null };
     },
   },
 
