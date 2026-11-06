@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=17';
-import { PARTS, getFit } from './parts.js?v=17';
-import { JOINER } from './joiner.js?v=17';
-import { PARTS2 } from './parts2.js?v=17';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=17';
+import { FRAME_STUDIO } from './framestudio.js?v=18';
+import { PARTS, getFit } from './parts.js?v=18';
+import { JOINER } from './joiner.js?v=18';
+import { PARTS2 } from './parts2.js?v=18';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=18';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -39,9 +39,17 @@ const GAUZE_ICONS = {
   grid: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M13 5v20M20 5v20M27 5v20M6 12h28M6 18h28"/>'),
   diamond: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M6 13l8-8M6 21l16-16M10 25l20-20M18 25l16-16M26 25l8-8M6 13l12 12M6 5l20 20M14 5l20 20M22 5l12 12"/>'),
   hex: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M12 10l3-2 3 2v4l-3 2-3-2zM18 10l3-2 3 2v4l-3 2-3-2zM24 10l3-2 3 2v4l-3 2-3-2zM15 16l3-2 3 2v4l-3 2-3-2zM21 16l3-2 3 2v4l-3 2-3-2z"/>'),
+  dots: ic2('<rect x="6" y="5" width="28" height="20" rx="3" fill="currentColor" fill-opacity=".12"/><g fill="currentColor" stroke="none"><circle cx="12" cy="10" r="1.6"/><circle cx="20" cy="10" r="1.6"/><circle cx="28" cy="10" r="1.6"/><circle cx="16" cy="15" r="1.6"/><circle cx="24" cy="15" r="1.6"/><circle cx="12" cy="20" r="1.6"/><circle cx="20" cy="20" r="1.6"/><circle cx="28" cy="20" r="1.6"/></g>'),
+  scatter: ic2('<rect x="6" y="5" width="28" height="20" rx="3" fill="currentColor" fill-opacity=".12"/><g fill="currentColor" stroke="none"><circle cx="11" cy="10" r="2"/><circle cx="19" cy="8.5" r="1"/><circle cx="26" cy="11" r="1.7"/><circle cx="15" cy="17" r="1.2"/><circle cx="22" cy="19" r="2.2"/><circle cx="29.5" cy="18" r="1"/><circle cx="10" cy="21" r="1"/></g>'),
+  lacedot: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M6 11l6-6 6 6 6-6 6 6 4-4M6 11l6 6 6-6 6 6 6-6 4 4M6 23l6-6 6 6 6-6 6 6" stroke-width="1"/><g fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.5"/><circle cx="24" cy="5" r="1.5"/><circle cx="18" cy="11" r="1.5"/><circle cx="30" cy="11" r="1.5"/><circle cx="6.5" cy="11" r="1.5"/><circle cx="12" cy="17" r="1.5"/><circle cx="24" cy="17" r="1.5"/><circle cx="18" cy="23" r="1.5"/><circle cx="30" cy="23" r="1.5"/></g>'),
+  eyelet: ic2('<path fill="currentColor" fill-opacity=".25" stroke="none" fill-rule="evenodd" d="M9 5h22a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3zM11.5 11a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0zM25.5 11a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0zM18.5 19a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0z"/><rect x="6" y="5" width="28" height="20" rx="3"/><g stroke-width="1.4"><circle cx="13" cy="11" r="2.2"/><circle cx="27" cy="11" r="2.2"/><circle cx="20" cy="19" r="2.2"/></g>'),
+  scallop: ic2('<rect x="6" y="5" width="28" height="20" rx="3"/><path d="M6 9a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0M9.5 12.5a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0M6 16a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0M9.5 19.5a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0a3.5 3.5 0 0 0 7 0" stroke-width="1"/>'),
 };
 
 // ---------------------------------------------------------------------------
+const MESH_FILLS = ['grid', 'diamond', 'hex', 'scallop'];
+const DOT_FILLS = ['dots', 'scatter', 'lacedot', 'eyelet'];
+
 export const TOOLS = [
   // ======================= 印章 =======================
   {
@@ -254,7 +262,7 @@ export const TOOLS = [
   // ======================= 仿欧根纱 =======================
   {
     id: 'organza', name: '仿欧根纱', tagline: '底部一层薄纱 + 凸起线条，像刺绣在纱上', sample: 'butterfly',
-    defaults: { size: 60, gauze: 0.2, inset: 0, lineH: 0.6, fill: 'solid', meshGap: 2.5, meshW: 0.5 },
+    defaults: { size: 60, gauze: 0.2, inset: 0, lineH: 0.6, fill: 'solid', meshGap: 2.5, meshW: 0.5, dotShape: 'circle', dotSize: 1.6, dotGap: 4, dotH: 0.4, dotColor: 'line', seed: 1 },
     groups: [
       { title: '尺寸', params: [
         { k: 'size', label: '图案大小', hint: '图案最长的一边', type: 'range', min: 15, max: 200, step: 1, unit: 'mm' },
@@ -267,9 +275,20 @@ export const TOOLS = [
           ['grid', '方格网', '规整的小方格', GAUZE_ICONS.grid],
           ['diamond', '菱形网纱', '像婚纱头纱', GAUZE_ICONS.diamond],
           ['hex', '六角蕾丝网', '蜂窝状网眼', GAUZE_ICONS.hex],
+          ['scallop', '鱼鳞蕾丝', '一排排小扇贝', GAUZE_ICONS.scallop],
+          ['lacedot', '蕾丝波点', '网纱交点上缀小点', GAUZE_ICONS.lacedot],
+          ['dots', '波点纱', '实心纱上整齐的小点', GAUZE_ICONS.dots],
+          ['scatter', '自由波点', '大小不一、随意撒开', GAUZE_ICONS.scatter],
+          ['eyelet', '洞洞绣', '纱上镂空小洞，洞边一圈凸起', GAUZE_ICONS.eyelet],
         ] },
-        { k: 'meshGap', label: '网眼大小', hint: '网线之间的距离', type: 'range', min: 1, max: 6, step: 0.1, unit: 'mm', show: p => p.fill !== 'solid' },
-        { k: 'meshW', label: '网线粗细', hint: 'P1S 0.4 喷嘴：0.45–0.6 最细又打得出来', type: 'range', min: 0.4, max: 1.2, step: 0.05, unit: 'mm', show: p => p.fill !== 'solid' },
+        { k: 'meshGap', label: '网眼大小', hint: '网线之间的距离', type: 'range', min: 1, max: 6, step: 0.1, unit: 'mm', show: p => MESH_FILLS.includes(p.fill) },
+        { k: 'meshW', label: '网线粗细', hint: 'P1S 0.4 喷嘴：0.45–0.6 最细又打得出来', type: 'range', min: 0.4, max: 1.2, step: 0.05, unit: 'mm', show: p => MESH_FILLS.includes(p.fill) || p.fill === 'lacedot' },
+        { k: 'dotShape', label: '点的形状', type: 'seg', options: [['circle', '圆点'], ['flower', '小花'], ['star', '星星'], ['heart', '爱心']], show: p => DOT_FILLS.includes(p.fill) },
+        { k: 'dotSize', label: '点的大小', hint: '直径；自由波点是最大的那颗，其他会小一些', type: 'range', min: 0.6, max: 6, step: 0.1, unit: 'mm', show: p => DOT_FILLS.includes(p.fill) },
+        { k: 'dotGap', label: '点的间距', hint: '相邻两个点中心的距离；自由波点是大概的疏密', type: 'range', min: 1.5, max: 12, step: 0.1, unit: 'mm', show: p => DOT_FILLS.includes(p.fill) },
+        { k: 'seed', label: '换一种撒法', hint: '拖一下就会重新随机撒点', type: 'range', min: 1, max: 60, step: 1, unit: '', show: p => p.fill === 'scatter' },
+        { k: 'dotH', label: '点凸起', hint: '比纱层高出多少；0 = 平的。洞洞绣是洞边那一圈的高度', type: 'range', min: 0, max: 1.2, step: 0.05, unit: 'mm', show: p => DOT_FILLS.includes(p.fill) },
+        { k: 'dotColor', label: '凸起部分的颜色', type: 'seg', options: [['line', '跟线条'], ['gauze', '跟纱层']], show: p => DOT_FILLS.includes(p.fill) && (p.dotH > 0 || p.fill !== 'lacedot') },
       ] },
       { title: '线条', params: [
         { k: 'lineH', label: '线条高出纱层', type: 'range', min: 0.2, max: 2.4, step: 0.1, unit: 'mm' },
@@ -277,7 +296,10 @@ export const TOOLS = [
     ],
     build(art, img, p) {
       // 网纱的线很细，用更高的分辨率（每像素 ≤ 网线宽的 1/6）
-      const px = p.fill === 'solid' ? 800 : Math.min(2200, Math.max(800, Math.ceil((p.size + 6) / (p.meshW / 6))));
+      // 点类的纱按点的大小定分辨率（每像素 ≤ 点直径的 1/12）
+      const isMesh = MESH_FILLS.includes(p.fill), isDot = DOT_FILLS.includes(p.fill);
+      const fine = Math.min(isMesh || p.fill === 'lacedot' ? p.meshW / 6 : 9, isDot ? p.dotSize / 12 : 9, p.fill === 'eyelet' ? EYELET_RING / 5 : 9);
+      const px = fine >= 9 ? 800 : Math.min(2200, Math.max(800, Math.ceil((p.size + 6) / fine)));
       const { sp, f } = placeArt(art, img, p.size, 3, { px });
       let sil = fillHoles(sp, f), lines = f, bridged = 0;
       const count = g => { let n = 0; for (let i = 0; i < g.length; i++) if (g[i] >= 0.5) n++; return n; };
@@ -319,19 +341,29 @@ export const TOOLS = [
       if (b < a * 1.15) warnings.push('这张图的线条围不出一个区域（像一条单独的线），纱层没法铺。仿欧根纱适合有外轮廓的线稿。');
       const top = p.gauze + p.lineH;
       // 线条已经把整个轮廓盖满时（比如实心的字），就没有单独的纱层
-      let gauzeF = F.sub(gauze, lines), meshInfo = null;
-      if (p.fill !== 'solid') {
+      let gauzeF = F.sub(gauze, lines), meshInfo = null, raised = null, dotInfo = null;
+      if (isMesh) {
         // 网纱：图案 ∩ 纱层区域。网线一直延伸到外轮廓线上，所以整片自然连在一起
         gauzeF = F.sub(F.inter(meshPattern(sp, p.fill, p.meshGap, p.meshW), gauze), lines);
         meshInfo = connectMesh(sp, lines, gauzeF, gauze, p.meshGap);
         gauzeF = meshInfo.gauzeF;
+      } else if (isDot) {
+        dotInfo = dotGauze(sp, p, gauzeF, gauze, lines);
+        gauzeF = dotInfo.gauzeF; raised = dotInfo.raised; meshInfo = dotInfo.meshInfo;
       }
-      const gauzeGeo = buildSolid(sp, [{ f: gauzeF, z0: 0, z1: p.gauze }]);
+      // 点的处理：凸起（在纱层上面加高）或者 0 高度时做成平面双色（嵌在纱层里，换成线条颜色）
+      let rz = [], inlay = false;
+      if (raised) {
+        if (p.dotH > 0) rz = [{ f: raised, z0: p.gauze, z1: p.gauze + p.dotH }];
+        else if (p.dotColor === 'line' && p.fill !== 'lacedot') { gauzeF = F.sub(gauzeF, raised); rz = [{ f: raised, z0: 0, z1: p.gauze }]; inlay = true; }
+      }
+      const raisedOnLine = rz.length > 0 && p.dotColor === 'line';
+      const gauzeGeo = buildSolid(sp, [{ f: gauzeF, z0: 0, z1: p.gauze }, ...(raisedOnLine ? [] : rz)]);
       if (!gauzeGeo) warnings.push('这张图的线条把整个轮廓都盖满了，没有露出纱的地方。仿欧根纱适合“线框”式的线稿；实心图案可以用“线稿加厚”。');
       return {
         // 拆成两个零件：线条 + 纱层（不重叠），方便多色打印机分别指定耗材
         parts: [
-          { ...solid(sp, [{ f: lines, z0: 0, z1: top }], '线条'), keepPlace: true },
+          { ...solid(sp, [{ f: lines, z0: 0, z1: top }, ...(raisedOnLine ? rz : [])], '线条'), keepPlace: true },
           ...(gauzeGeo ? [{ geo: gauzeGeo, label: '纱层', keepPlace: true, second: true }] : []),
         ],
         warnings: meshInfo && !meshInfo.ok ? [...warnings, `网纱还有 ${meshInfo.loose} 块和主体没连上（打印后会掉下来）。把“网眼大小”调小，或把“网线粗细”调大一点再试试。`] : warnings,
@@ -339,8 +371,12 @@ export const TOOLS = [
         notes: [
           ...(bridged > 0 ? [`外圈有缺口，已经自动补上（缺口大约 ${r1(bridged * 2)}mm 以内），补的地方也加了一段线。`] : bridged < 0 ? ['外圈缺口比较大，已经按整体外形补齐，补的地方也加了一段线。'] : []),
           '纱层用半透明或透明耗材打印效果最好（透明 PETG / 透明 PLA）；预览里用“第二颜色”显示，方便看清。',
-          ...(meshInfo ? [
-            `网纱：网眼 ${p.meshGap}mm、网线 ${p.meshW}mm。已检查连通性：${meshInfo.ok ? '线条和网纱连成一整片 ✓' : `还有 ${meshInfo.loose} 块没连上`}${meshInfo.patched ? `；有 ${meshInfo.patched} 处小细节没碰到网线，已在它周围补了一小块实心纱把它连上` : ''}${meshInfo.crumbs ? `；去掉了 ${meshInfo.crumbs} 个单独漂着的网线碎屑` : ''}。`,
+          ...(dotInfo ? dotInfo.notes : []),
+          ...(inlay ? ['点是平的、换成线条颜色（平面双色），要用 AMS 才打得出来。'] : []),
+          ...(raised && !rz.length && p.fill !== 'lacedot' ? ['点是平的又和纱层同色，打出来看不见。把“点凸起”调大，或者颜色改成“跟线条”。'] : []),
+          ...(rz.length && !raisedOnLine ? ['凸起的点和纱层是同一种耗材：单色打印机没法只靠“在纱层高度换料”做出来，要用 AMS，或者把“凸起部分的颜色”改成“跟线条”。'] : []),
+          ...(meshInfo && (isMesh || p.fill === 'lacedot') ? [
+            `网纱：${p.fill === 'lacedot' ? `点距 ${dotInfo.gap}mm` : `网眼 ${p.meshGap}mm`}、网线 ${p.meshW}mm。已检查连通性：${meshInfo.ok ? '线条和网纱连成一整片 ✓' : `还有 ${meshInfo.loose} 块没连上`}${meshInfo.patched ? `；有 ${meshInfo.patched} 处小细节没碰到网线，已在它周围补了一小块实心纱把它连上` : ''}${meshInfo.crumbs ? `；去掉了 ${meshInfo.crumbs} 个单独漂着的网线碎屑` : ''}。`,
             'Bambu Studio 里打开「质量 → 检测薄壁」，并把「首层线宽」设成和网线粗细差不多（如 0.45），细网线才打得出来；首层速度调慢一点。',
           ] : []),
           '导出 3MF 后，“线条”和“纱层”是两个零件，在 Bambu Studio 里分别选 AMS 耗材就行；没有 AMS 就在纱层高度暂停换料。',
@@ -420,6 +456,125 @@ function mergeGeos(list) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+//  点类纱：波点纱 / 自由波点 / 蕾丝波点 / 洞洞绣
+// ---------------------------------------------------------------------------
+const EYELET_RING = 0.5;   // 洞洞绣洞边一圈的宽度（mm）
+
+/** 可复现的伪随机数 */
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+/** 在 (x,y) 画一个半径 r 的小图形（实心） */
+function motif(c, shape, x, y, r, rot = 0) {
+  c.save(); c.translate(x, y); c.rotate(rot); c.beginPath();
+  if (shape === 'flower') {
+    const pr = r * 0.42, pd = r - pr;
+    for (let k = 0; k < 5; k++) {
+      const a = -Math.PI / 2 + k * 2 * Math.PI / 5, px = pd * Math.cos(a), py = pd * Math.sin(a);
+      c.moveTo(px + pr, py); c.arc(px, py, pr, 0, Math.PI * 2);
+    }
+    c.moveTo(r * 0.45, 0); c.arc(0, 0, r * 0.45, 0, Math.PI * 2);
+  } else if (shape === 'star') {
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.5 : r;
+      k ? c.lineTo(rr * Math.cos(a), rr * Math.sin(a)) : c.moveTo(rr * Math.cos(a), rr * Math.sin(a));
+    }
+    c.closePath();
+  } else if (shape === 'heart') {
+    c.moveTo(0, 0.85 * r);
+    c.bezierCurveTo(-0.35 * r, 0.55 * r, -r, 0.15 * r, -r, -0.3 * r);
+    c.bezierCurveTo(-r, -0.8 * r, -0.3 * r, -1.0 * r, 0, -0.55 * r);
+    c.bezierCurveTo(0.3 * r, -1.0 * r, r, -0.8 * r, r, -0.3 * r);
+    c.bezierCurveTo(r, 0.15 * r, 0.35 * r, 0.55 * r, 0, 0.85 * r);
+    c.closePath();
+  } else {
+    c.arc(0, 0, r, 0, Math.PI * 2);
+  }
+  c.fill(); c.restore();
+}
+
+/** 错位排列的点阵，以图案中心为原点（对称好看） */
+function latticePts(sp, gap, rowH, r) {
+  const cx = (sp.xmin + sp.xmax) / 2, cy = (sp.ymin + sp.ymax) / 2, out = [];
+  const nj = Math.ceil((sp.ymax - sp.ymin) / 2 / rowH) + 2, ni = Math.ceil((sp.xmax - sp.xmin) / 2 / gap) + 2;
+  for (let j = -nj; j <= nj; j++) for (let i = -ni; i <= ni; i++) out.push({ x: cx + (i + (j & 1) * 0.5) * gap, y: cy + j * rowH, r, rot: 0 });
+  return out;
+}
+
+/** 自由波点：大小不一、随机撒开、互不相碰（飞镖法 + 网格加速） */
+function scatterPts(sp, room, R, gap, seed, shape) {
+  const rnd = mulberry32(seed * 7919 + 13);
+  const clr = Math.max(0.5, gap - 2 * R);
+  const W = sp.xmax - sp.xmin, H = sp.ymax - sp.ymin;
+  const tries = Math.min(150000, Math.ceil(W * H / (gap * gap) * 30));
+  const cs = 2 * R + 1.4 * clr, cols = Math.ceil(W / cs) + 1, grid = new Map(), out = [];
+  for (let t = 0; t < tries; t++) {
+    const x = sp.xmin + rnd() * W, y = sp.ymin + rnd() * H, r = R * (0.4 + 0.6 * rnd() ** 1.6), k = 0.75 + 0.6 * rnd(), a = rnd();
+    if (room(x, y) < r + 0.3) continue;
+    const gx = Math.floor((x - sp.xmin) / cs), gy = Math.floor((y - sp.ymin) / cs);
+    let ok = true;
+    for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1 && ok; dx++) {
+      for (const q of grid.get((gy + dy) * cols + gx + dx) || []) if (Math.hypot(q.x - x, q.y - y) < r + q.r + clr * k) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const rot = shape === 'heart' ? (a - 0.5) * 0.8 : a * Math.PI * 2;
+    const d = { x, y, r, rot }, key = gy * cols + gx;
+    out.push(d); (grid.get(key) || grid.set(key, []).get(key)).push(d);
+  }
+  return out;
+}
+
+/**
+ * 点类纱。free = 纱层里没被线条占掉的地方，region = 整个纱层区域。
+ * 返回 { gauzeF: 纱层（z 0..纱厚）, raised: 点（凸起或嵌色的部分）, meshInfo, notes, gap }
+ */
+function dotGauze(sp, p, free, region, lines) {
+  const R = p.dotSize / 2, notes = [];
+  const minGap = p.fill === 'eyelet' ? p.dotSize + 2 * EYELET_RING + 0.6 : p.dotSize + 0.6;
+  const gap = r1(Math.max(p.dotGap, minGap));
+  if (gap > p.dotGap + 1e-6) notes.push(`点的间距太小，点${p.fill === 'eyelet' ? '和洞边' : ''}之间留不出空隙，已自动放宽到 ${gap}mm，免得粘成一片。`);
+  const din = distInside(sp, free);
+  const room = (x, y) => {
+    const i = Math.round((x - sp.x0) / sp.res - 0.5), j = Math.round((y - sp.y0) / sp.res - 0.5);
+    return i < 0 || j < 0 || i >= sp.w || j >= sp.h ? 0 : din[j * sp.w + i];
+  };
+  const draw = list => sp.draw(c => { for (const d of list) motif(c, p.dotShape, d.x, d.y, d.r, d.rot); });
+  const rowH = p.fill === 'lacedot' ? gap * 0.6 : gap * Math.sqrt(3) / 2;
+  const pts = p.fill === 'scatter' ? scatterPts(sp, room, R, gap, p.seed, p.dotShape) : latticePts(sp, gap, rowH, R);
+  let gauzeF = free, raised, meshInfo = null, n;
+
+  if (p.fill === 'lacedot') {
+    // 菱形网线 + 每个交点上一个点（像法式点点网纱 point d'esprit），整片要连通
+    const net = sp.draw(c => {
+      c.lineWidth = p.meshW; c.lineCap = 'round'; c.beginPath();
+      for (const d of pts) { c.moveTo(d.x, d.y); c.lineTo(d.x + gap / 2, d.y + rowH); c.moveTo(d.x, d.y); c.lineTo(d.x - gap / 2, d.y + rowH); }
+      c.stroke();
+      for (const d of pts) motif(c, p.dotShape, d.x, d.y, d.r, d.rot);
+    });
+    gauzeF = F.sub(F.inter(net, region), lines);
+    meshInfo = connectMesh(sp, lines, gauzeF, region, gap);
+    gauzeF = meshInfo.gauzeF;
+    const keep = pts.filter(d => room(d.x, d.y) >= d.r * 0.9);
+    raised = F.inter(draw(keep), gauzeF); n = keep.length;
+  } else if (p.fill === 'eyelet') {
+    // 实心纱上开小洞，洞边一圈加厚（像洞洞绣 / 英式刺绣）。洞离线条和边缘留足距离，纱不会断开
+    const keep = pts.filter(d => room(d.x, d.y) >= d.r + EYELET_RING + 0.5);
+    const holes = draw(keep);
+    gauzeF = F.sub(free, holes);
+    raised = F.sub(F.inter(dilate(sp, holes, EYELET_RING), free), holes); n = keep.length;
+  } else {
+    // 实心纱 + 点：点不碰线条，也不贴着边缘
+    const keep = p.fill === 'scatter' ? pts : pts.filter(d => room(d.x, d.y) >= d.r + 0.3);
+    raised = F.inter(draw(keep), free); n = keep.length;
+  }
+  if (!n) notes.push('纱层上的空间太小，一个点都放不下。把“点的大小”或“点的间距”调小试试。');
+  else notes.push(`${{ dots: '波点纱', scatter: '自由波点', lacedot: '蕾丝波点', eyelet: '洞洞绣' }[p.fill]}：放了 ${n} 个${p.fill === 'eyelet' ? '洞' : '点'}${p.fill === 'scatter' ? '，拖“换一种撒法”可以重新随机' : ''}。${p.fill === 'scatter' || p.fill === 'dots' ? '点之间不相连，靠底下这层实心纱托住。' : ''}`);
+  if (p.dotSize < 1.2 && p.dotH > 0) notes.push('点小于 1.2mm 时，凸起部分只有一两圈挤出线，打出来会更像小圆疙瘩；想要清楚的形状（小花、星星、爱心）建议 ≥ 2.5mm。');
+  return { gauzeF, raised, meshInfo, notes, gap };
+}
+
 /** 网纱图案（覆盖整个网格范围的细线），之后再和纱层区域取交集 */
 function meshPattern(sp, kind, gap, w) {
   const x0 = sp.xmin, x1 = sp.xmax, y0 = sp.ymin, y1 = sp.ymax, D = Math.hypot(x1 - x0, y1 - y0);
@@ -438,6 +593,12 @@ function meshPattern(sp, kind, gap, w) {
           const cx = (x0 + x1) / 2 + nx * k, cy = (y0 + y1) / 2 + ny * k;
           c.moveTo(cx - dx * D, cy - dy * D); c.lineTo(cx + dx * D, cy + dy * D);
         }
+      }
+    } else if (kind === 'scallop') {
+      // 鱼鳞 / 扇贝：每排半圆，下一排错开半个，端点正好落在上一排的弧底，整片连通
+      const R = gap / 2;
+      for (let j = 0, y = y0 - gap; y <= y1 + R; j++, y += R) {
+        for (let x = x0 - gap + (j % 2 ? R : 0); x <= x1 + gap; x += gap) { c.moveTo(x + R, y); c.arc(x, y, R, 0, Math.PI); }
       }
     } else {
       // 六角蜂窝：gap 是相邻网眼中心距

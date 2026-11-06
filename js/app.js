@@ -1,12 +1,12 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=17';
-import { TOOLS } from './tools.js?v=17';
-import { SAMPLES } from './samples.js?v=17';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=17';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=17';
-import { getFit, setFit } from './parts.js?v=17';
-import { export3MF } from './export3mf.js?v=17';
+import { Viewer, Thumbnailer } from './viewer.js?v=18';
+import { TOOLS } from './tools.js?v=18';
+import { SAMPLES } from './samples.js?v=18';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=18';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=18';
+import { getFit, setFit } from './parts.js?v=18';
+import { export3MF } from './export3mf.js?v=18';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -150,7 +150,7 @@ $('#scrim').addEventListener('click', closeSide);
 $('#sideNav').addEventListener('click', e => { if (e.target.closest('a')) closeSide(); });
 
 // ---------- 首页 ----------
-const THUMB_V = 'thumb.v10.';
+const THUMB_V = 'thumb.v11.';
 const TILE_BG = { 'var(--t-mint)': '#dcf1e9', 'var(--t-peach)': '#fde4d8', 'var(--t-butter)': '#faefcc', 'var(--t-lilac)': '#ebe6fb', 'var(--t-sky)': '#dfecf8', 'var(--t-rose)': '#fbe1e9', 'var(--t-sand)': '#eee8de' };
 function renderHome() {
   const card = t => {
