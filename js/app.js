@@ -1,12 +1,12 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=22';
-import { TOOLS } from './tools.js?v=22';
-import { SAMPLES } from './samples.js?v=22';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=22';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=22';
-import { getFit, setFit } from './parts.js?v=22';
-import { export3MF } from './export3mf.js?v=22';
+import { Viewer, Thumbnailer } from './viewer.js?v=23';
+import { TOOLS } from './tools.js?v=23';
+import { SAMPLES } from './samples.js?v=23';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=23';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=23';
+import { getFit, setFit } from './parts.js?v=23';
+import { export3MF } from './export3mf.js?v=23';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
