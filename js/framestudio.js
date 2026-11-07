@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=20';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=20';
+import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=21';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=21';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -32,7 +32,7 @@ export const FRAME_STUDIO = {
   defaults: {
     rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
-    holder: 'full', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, tol: 0.2, attach: 'glue',
+    holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, tol: 0.2, attach: 'glue',
     keyhole: true, magnet: false, magN: '4', magD: 10, magT: 3, loop: false, loopD: 4,
     stand: true, standStyle: 'arch', tilt: 12, tongueW: 30, tongueL: 8, tongueT: 3, baseW: 70, baseD: 40, baseH: 14,
   },
@@ -63,6 +63,7 @@ export const FRAME_STUDIO = {
         ['corners', '四角卡角', '4 个小卡角，最省料', HOLDER_ICONS.corners],
         ['none', '不要夹层', '自己另外处理', HOLDER_ICONS.none],
       ] },
+      { k: 'holderFit', label: '夹层外形', hint: '跟随：边框窄的地方夹层自动收窄，从正面看不到夹层', type: 'seg', options: [['follow', '跟随相框外形'], ['rect', '方形']], show: p => ['full', 'half', 'cover'].includes(p.holder) },
       { k: 'insert', label: '照片从哪边插', type: 'seg', options: [['top', '上边'], ['left', '左边'], ['right', '右边']], show: p => p.holder === 'full' || p.holder === 'half' },
       { k: 'slotT', label: '夹层厚度', hint: '照片 + 卡纸，一般 0.8–1.5', type: 'range', min: 0.4, max: 4, step: 0.1, unit: 'mm', show: p => p.holder !== 'none' },
       { k: 'wall', label: '外壁宽度', type: 'range', min: 2, max: 10, step: 0.5, unit: 'mm', show: p => p.holder !== 'none' },
@@ -155,10 +156,38 @@ export const FRAME_STUDIO = {
     const P = { w: pw + 0.6, h: ph + 0.6 };
     const hasHolder = p.holder !== 'none';
     const hw = P.w / 2 + (hasHolder ? p.wall : 0), hh = P.h / 2 + (hasHolder ? p.wall : 0);
-    if (hasHolder) {
+    // 跟随相框外形：夹层只保留在相框背面（往里缩 0.8mm）之内，边框窄的地方外壁自动变窄
+    const follow = hasHolder && p.holderFit === 'follow' && ['full', 'half', 'cover'].includes(p.holder);
+    const MINW = 0.8;   // 跟随时最少保留的外壁
+    const bodyIn = follow ? erode(sp, body, 0.8) : null;
+    const sticks = (ex, ey) => {
       let out = false;
-      for (let t = 0; t <= 1; t += 0.01) for (const [x, y] of [[-hw + 2 * hw * t, -hh], [-hw + 2 * hw * t, hh], [-hw, -hh + 2 * hh * t], [hw, -hh + 2 * hh * t]]) { const i = pix(x, y); if (i < 0 || body[i] < 0.5) out = true; }
-      if (out) warnings.push('夹层外框比相框背面大，从正面会露出来一点。可以减小“外壁宽度”，或者用边框更宽的图。');
+      for (let t = 0; t <= 1 && !out; t += 0.005) for (const [x, y] of [[-ex + 2 * ex * t, -ey], [-ex + 2 * ex * t, ey], [-ex, -ey + 2 * ey * t], [ex, -ey + 2 * ey * t]]) { const i = pix(x, y); if (i < 0 || body[i] < 0.5) { out = true; break; } }
+      return out;
+    };
+    if (hasHolder) {
+      if (follow) {
+        if (sticks(P.w / 2 + MINW, P.h / 2 + MINW)) warnings.push('有的地方相框边框比照片还窄，夹层再怎么收窄也会露出来一点（照片本身也会露边）。可以把“压边”调小（相框会按比例放大），或者选小一号的照片尺寸。');
+        else if (sticks(hw, hh)) { notes.push(`夹层外形已经按相框背面修剪：边框窄的地方外壁会变窄（最窄 ${MINW}mm），从正面看不到夹层。`); }
+      } else if (sticks(hw, hh)) warnings.push('夹层外框比相框背面大，从正面会露出来一点。把“夹层外形”改成“跟随相框外形”，或者减小“外壁宽度”。');
+    }
+    // 定位销：默认在外壁四个角；角上没有相框材料时沿着外壁往中间找
+    const pinR = 1.45, insertSide = { top: 'top', left: 'left', right: 'right' }[p.insert];
+    const pinOk = (x, y) => { for (let a = 0; a < 8; a++) { const t = a * Math.PI / 4, i = pix(x + Math.cos(t) * (pinR + 0.6), y + Math.sin(t) * (pinR + 0.6)); if (i < 0 || (bodyIn || body)[i] < 0.5) return false; } return true; };
+    let pinList = pinSpots(P, p.wall), pinMiss = 0;
+    if (follow && p.attach === 'pins') {
+      const o = p.wall / 2;
+      pinList = [];
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        let spot = null;
+        const X = sx * (P.w / 2 + o), Y = sy * (P.h / 2 + o);
+        for (let d = 0; d < Math.max(P.w, P.h) / 2 && !spot; d += 0.5) {
+          if (pinOk(X, Y - sy * d) && Math.abs(Y - sy * d) <= P.h / 2 + o) spot = [X, Y - sy * d];
+          else if (!(p.holder !== 'cover' && sy < 0 && insertSide === 'top') && pinOk(X - sx * d, Y) && Math.abs(X - sx * d) <= P.w / 2 + o) spot = [X - sx * d, Y];
+        }
+        if (spot) pinList.push(spot); else pinMiss++;
+      }
+      if (pinMiss) warnings.push(`有 ${pinMiss} 个定位销找不到地方放（那里的边框太窄），会少几个销，记得点胶加固。`);
     }
 
     // ---- 挂件位置搜索：在主体上、避开夹层、厚度够 ----
@@ -205,7 +234,7 @@ export const FRAME_STUDIO = {
       if (miss < corners.length) notes.push(`背面有 Ø${r1(p.magD)}×${r1(p.magT)}mm 的磁铁坑，挤一点胶把磁铁压进去。`);
     }
     if (p.attach === 'pins' && ['full', 'half', 'cover'].includes(p.holder)) {
-      for (const [x, y] of pinSpots(P, p.wall)) back.push({ f: sp.circle(x, y, 1.45), z0: 0, z1: 2.4 });
+      for (const [x, y] of pinList) back.push({ f: sp.circle(x, y, 1.45), z0: 0, z1: 2.4 });
       if (minBodyH < 3.2) warnings.push('定位销孔深 2.4mm，边框最薄处不够厚，正面可能会被打穿。');
     }
 
@@ -229,7 +258,12 @@ export const FRAME_STUDIO = {
     const parts = [{ geo: frameGeo, label: '相框' }];
 
     // ---- 夹层零件 ----
-    if (hasHolder) parts.push(...holderParts(p, P));
+    if (hasHolder) parts.push(...holderParts(p, P, {
+      pins: pinList,
+      // 夹层坐标 → 相框坐标：夹层翻过来贴，左右对调
+      clip: follow ? (x, y) => { const i = pix(-x, y); return i < 0 ? 0 : bodyIn[i]; } : null,
+      minW: MINW,
+    }));
     // ---- 底座零件 ----
     if (p.stand) {
       const { geo, warn } = standBase(p);
@@ -260,7 +294,7 @@ function pinSpots(P, wall) {
 }
 
 /** 夹层零件（按打印方向：贴相框的那面朝上）。翻过来贴到相框背面时左右会对调，所以这里左右镜像。 */
-function holderParts(p, P) {
+function holderParts(p, P, opt = {}) {
   const w = p.wall, ox = P.w / 2 + w, oy = P.h / 2 + w;
   if (p.holder === 'corners') {
     const c = Math.min(18, Math.min(P.w, P.h) * 0.22);
@@ -271,7 +305,13 @@ function holderParts(p, P) {
     return [0, 1, 2, 3].map(k => { const g = one.clone(); return { geo: g, label: '卡角' }; });
   }
   const sp = new Space(-ox - 3, -oy - 3, ox + 3, oy + 3, 700);
-  const outer = sp.rect(-ox, -oy, 2 * ox, 2 * oy, 2.5);
+  let outer = sp.rect(-ox, -oy, 2 * ox, 2 * oy, 2.5);
+  if (opt.clip) {
+    // 跟随相框外形：方形外框 ∩ 相框背面，再保证照片四周至少留 minW 的外壁
+    const cf = sp.field();
+    for (let j = 0; j < sp.h; j++) for (let i = 0; i < sp.w; i++) { const [x, y] = sp.mm(i, j); cf[j * sp.w + i] = opt.clip(x, y); }
+    outer = F.union(F.inter(outer, cf), sp.rect(-P.w / 2 - opt.minW, -P.h / 2 - opt.minW, P.w + 2 * opt.minW, P.h + 2 * opt.minW, 0.6));
+  }
   const side = { top: 'top', left: 'right', right: 'left' }[p.insert]; // 镜像
   const ext = 50;
   const extend = (x0, y0, x1, y1) => {
@@ -279,7 +319,8 @@ function holderParts(p, P) {
     return sp.rect(x0, y0, x1 - x0, y1 - y0);
   };
   const cav = extend(-P.w / 2, -P.h / 2, P.w / 2, P.h / 2);
-  const pins = top => p.attach === 'pins' ? [{ f: F.union(...pinSpots(P, w).map(([x, y]) => sp.circle(x, y, 1.2))), z0: top, z1: top + 2 }] : [];
+  const pinPts = (opt.pins || pinSpots(P, w)).map(([x, y]) => [-x, y]);   // 相框坐标 → 夹层坐标（左右镜像）
+  const pins = top => p.attach === 'pins' && pinPts.length ? [{ f: F.union(...pinPts.map(([x, y]) => sp.circle(x, y, 1.2))), z0: top, z1: top + 2 }] : [];
   if (p.holder === 'full') {
     const top = p.backT + p.slotT;
     return [{ geo: buildSolid(sp, [{ f: outer, z0: 0, z1: p.backT }, { f: F.sub(outer, cav), z0: p.backT, z1: top }, ...pins(top)]), label: '夹层' }];
