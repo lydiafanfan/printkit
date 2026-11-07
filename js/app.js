@@ -1,12 +1,12 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=18';
-import { TOOLS } from './tools.js?v=18';
-import { SAMPLES } from './samples.js?v=18';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=18';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=18';
-import { getFit, setFit } from './parts.js?v=18';
-import { export3MF } from './export3mf.js?v=18';
+import { Viewer, Thumbnailer } from './viewer.js?v=19';
+import { TOOLS } from './tools.js?v=19';
+import { SAMPLES } from './samples.js?v=19';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=19';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=19';
+import { getFit, setFit } from './parts.js?v=19';
+import { export3MF } from './export3mf.js?v=19';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -30,6 +30,7 @@ const ICONS = {
   buckle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="8" height="10" rx="1.5"/><path d="M10 9h4l3-2M10 15h4l3 2"/><rect x="15" y="6" width="7" height="12" rx="2"/></svg>',
   joiner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h7v12H3zM14 6h7v12h-7z"/><path d="M8 10h8M8 14h8" stroke-width="2.4"/></svg>',
   tolerance: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="10" rx="2"/><circle cx="7" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.9"/><circle cx="17" cy="12" r="2.4"/></svg>',
+  button: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="6" stroke-opacity=".5"/><circle cx="10" cy="10" r=".9" fill="currentColor"/><circle cx="14" cy="10" r=".9" fill="currentColor"/><circle cx="10" cy="14" r=".9" fill="currentColor"/><circle cx="14" cy="14" r=".9" fill="currentColor"/></svg>',
   framestudio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M7 15l3-3 2 2 2-1.5 3 2.5"/></svg>',
 };
 const PALETTE = [['#8fd3c1', '薄荷'], ['#f4c6b8', '蜜桃'], ['#f3dc9b', '奶油'], ['#a9bde6', '雾蓝'], ['#f7f4ee', '白色'], ['#d9d6cf', '灰白'], ['#9aa0a6', '灰色'], ['#2f2f33', '黑色'],
@@ -110,6 +111,7 @@ const META = {
   keychain: { tc: 'var(--t-lilac)', hex: '#ad9eea' },
   cookie: { tc: 'var(--t-butter)', hex: '#ecc463' },
   organza: { tc: 'var(--t-rose)', hex: '#e78ea6' },
+  button: { tc: 'var(--t-sand)', hex: '#d9b28a' },
   framestudio: { tc: 'var(--t-mint)', hex: '#79c9ae' },
   tolerance: { tc: 'var(--t-mint)', hex: '#6fbfa6' },
   storage: { tc: 'var(--t-sand)', hex: '#d9b28a' },
@@ -150,7 +152,7 @@ $('#scrim').addEventListener('click', closeSide);
 $('#sideNav').addEventListener('click', e => { if (e.target.closest('a')) closeSide(); });
 
 // ---------- 首页 ----------
-const THUMB_V = 'thumb.v11.';
+const THUMB_V = 'thumb.v12.';
 const TILE_BG = { 'var(--t-mint)': '#dcf1e9', 'var(--t-peach)': '#fde4d8', 'var(--t-butter)': '#faefcc', 'var(--t-lilac)': '#ebe6fb', 'var(--t-sky)': '#dfecf8', 'var(--t-rose)': '#fbe1e9', 'var(--t-sand)': '#eee8de' };
 function renderHome() {
   const card = t => {

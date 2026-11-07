@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=18';
-import { PARTS, getFit } from './parts.js?v=18';
-import { JOINER } from './joiner.js?v=18';
-import { PARTS2 } from './parts2.js?v=18';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=18';
+import { FRAME_STUDIO } from './framestudio.js?v=19';
+import { PARTS, getFit } from './parts.js?v=19';
+import { JOINER } from './joiner.js?v=19';
+import { PARTS2 } from './parts2.js?v=19';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=19';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -47,6 +47,10 @@ const GAUZE_ICONS = {
 };
 
 // ---------------------------------------------------------------------------
+const BTN_ICONS = {
+  two: ic2('<circle cx="20" cy="15" r="11"/><circle cx="20" cy="15" r="8" stroke-opacity=".45"/><circle cx="16.5" cy="15" r="1.7" fill="currentColor"/><circle cx="23.5" cy="15" r="1.7" fill="currentColor"/>'),
+  four: ic2('<circle cx="20" cy="15" r="11"/><circle cx="20" cy="15" r="8" stroke-opacity=".45"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/><circle cx="23" cy="12" r="1.5" fill="currentColor"/><circle cx="17" cy="18" r="1.5" fill="currentColor"/><circle cx="23" cy="18" r="1.5" fill="currentColor"/>'),
+};
 const MESH_FILLS = ['grid', 'diamond', 'hex', 'scallop'];
 const DOT_FILLS = ['dots', 'scatter', 'lacedot', 'eyelet'];
 
@@ -301,29 +305,8 @@ export const TOOLS = [
       const fine = Math.min(isMesh || p.fill === 'lacedot' ? p.meshW / 6 : 9, isDot ? p.dotSize / 12 : 9, p.fill === 'eyelet' ? EYELET_RING / 5 : 9);
       const px = fine >= 9 ? 800 : Math.min(2200, Math.max(800, Math.ceil((p.size + 6) / fine)));
       const { sp, f } = placeArt(art, img, p.size, 3, { px });
-      let sil = fillHoles(sp, f), lines = f, bridged = 0;
-      const count = g => { let n = 0; for (let i = 0; i < g.length; i++) if (g[i] >= 0.5) n++; return n; };
-      const nf = count(f);
-      const base0 = count(sil);
-      if (base0 < nf * 1.3) {
-        // 线条几乎没围出区域 = 外圈有缺口：线条“膨胀—填满—收回”（闭运算）把缺口补上；面积明显变大才算真的补上了
-        const need = Math.max(nf * 1.3, base0 * 1.6);
-        {
-          for (const r of [0.6, 1.2, 2, 3, 4.5, 6, 8, 11, 15]) {
-            const closed = erode(sp, fillHoles(sp, dilate(sp, f, r)), r);
-            if (count(closed) >= need) { sil = F.union(closed, f); bridged = r; break; }
-          }
-          if (!bridged) {
-            // 缺口太大：按整体外形（凸包）补齐
-            const pts = [];
-            for (let y = 0; y < sp.h; y += 2) for (let x = 0; x < sp.w; x += 2) if (f[y * sp.w + x] >= 0.5) pts.push(sp.mm(x, y));
-            const hull = convexHull(pts);
-            if (hull.length >= 3) {
-              const hf = sp.draw(c => { c.beginPath(); hull.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); });
-              if (count(hf) >= need) { sil = F.union(hf, f); bridged = -1; }
-            }
-          }
-        }
+      let { sil, bridged } = solidify(sp, f), lines = f;
+      {
         if (bridged) {
           // 在补上的缺口处也补一段线，让外圈完整
           const df = distInside(sp, f), vals = [];
@@ -386,6 +369,153 @@ export const TOOLS = [
         ],
         colorChange: p.gauze,
       };
+    },
+  },
+
+  // ======================= 纽扣 =======================
+  {
+    id: 'button', name: '纽扣', tagline: '线稿变成实心纽扣，两孔或四孔，边缘圆滑或利落', sample: 'daisy',
+    defaults: { size: 25, thick: 3.2, holes: '4', holeD: 2, holeSpace: 4.5, angle2: '0', angle4: '0', bevel: 0.8, face: 'dish', dishD: 0.6, rimW: 1.8, detail: 'none', detailH: 0.4, count: 1 },
+    groups: [
+      { title: '尺寸', params: [
+        { k: 'size', label: '纽扣大小', hint: '最长的一边；常见衬衫扣 11–15，外套扣 20–30', type: 'range', min: 8, max: 60, step: 0.5, unit: 'mm' },
+        { k: 'thick', label: '厚度', type: 'range', min: 1.6, max: 6, step: 0.1, unit: 'mm' },
+      ] },
+      { title: '扣眼', params: [
+        { k: 'holes', label: '孔的数量', type: 'cards', cols: 2, options: [
+          ['2', '两孔', '', BTN_ICONS.two],
+          ['4', '四孔', '', BTN_ICONS.four],
+        ] },
+        { k: 'holeD', label: '孔直径', hint: '普通缝线 1.5–2；粗线 / 皮绳 2.5 以上', type: 'range', min: 1.2, max: 4, step: 0.1, unit: 'mm' },
+        { k: 'holeSpace', label: '孔间距', hint: '相邻两个孔中心的距离；纽扣放不下时会自动缩小', type: 'range', min: 2, max: 15, step: 0.1, unit: 'mm' },
+        { k: 'angle2', label: '排列方向', type: 'seg', options: [['0', '横排'], ['90', '竖排'], ['45', '斜排']], show: p => p.holes === '2' },
+        { k: 'angle4', label: '排列方向', type: 'seg', options: [['0', '正方'], ['45', '菱形']], show: p => p.holes === '4' },
+      ] },
+      { title: '边缘和正面', params: [
+        { k: 'bevel', label: '边缘圆滑', hint: '0 = 利落的直角边；越大越圆润（最多到厚度的一半）', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' },
+        { k: 'face', label: '正面', type: 'seg', options: [['dish', '内凹带边'], ['flat', '平面']] },
+        { k: 'dishD', label: '凹下深度', type: 'range', min: 0.2, max: 1.6, step: 0.1, unit: 'mm', show: p => p.face === 'dish' },
+        { k: 'rimW', label: '边框宽度', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm', show: p => p.face === 'dish' },
+        { k: 'detail', label: '线稿花纹', hint: '把线稿的线条刻在正面', type: 'seg', options: [['none', '不要'], ['engrave', '凹刻'], ['raise', '凸起']] },
+        { k: 'detailH', label: '花纹深度 / 高度', type: 'range', min: 0.2, max: 1.2, step: 0.1, unit: 'mm', show: p => p.detail !== 'none' },
+      ] },
+      { title: '数量', params: [
+        { k: 'count', label: '一次做几颗', hint: '一起排在打印板上', type: 'range', min: 1, max: 24, step: 1, unit: '颗' },
+      ] },
+    ],
+    build(art, img, p) {
+      const { sp, f } = placeArt(art, img, p.size, 3);
+      const { sil, bridged } = solidify(sp, f);
+      const dIn = distInside(sp, sil), N = dIn.length, res = sp.res;
+      const T = p.thick, warnings = [], notes = [];
+      // 内缩 e 毫米后的形状（用一张距离场，边缘抗锯齿）
+      const inset = e => { const o = new Float32Array(N); for (let i = 0; i < N; i++) { const v = dIn[i] / res - e / res; o[i] = v <= 0 ? 0 : v >= 1 ? 1 : v; } return o; };
+      const at = (x, y) => { const i = Math.round((x - sp.x0) / res - 0.5), j = Math.round((y - sp.y0) / res - 0.5); return i < 0 || j < 0 || i >= sp.w || j >= sp.h ? 0 : dIn[j * sp.w + i]; };
+      let maxD = 0, mi = 0; for (let i = 0; i < N; i++) if (dIn[i] > maxD) { maxD = dIn[i]; mi = i; }
+
+      // ---- 边缘圆角：不超过厚度的一半，也不超过形状最窄处 ----
+      const r = Math.min(p.bevel, T / 2 - 0.05, maxD * 0.8);
+      if (p.bevel > r + 0.05) notes.push(`边缘圆滑已限制在 ${r1(r)}mm（不能超过厚度的一半）。`);
+      // ---- 内凹 ----
+      let dish = p.face === 'dish';
+      const D = Math.min(p.dishD, T - 1.2), W = Math.max(D * 1.4, 0.8);   // W：凹面斜坡的宽度
+      if (dish && maxD < p.rimW + W + p.holeD) { dish = false; notes.push('纽扣太小，放不下内凹和边框，已改成平面。'); }
+
+      // ---- 扣眼位置：形状中心；中心太靠边（比如月牙形）就用离边最远的点 ----
+      let [cx, cy] = centroid(sp, sil);
+      if (at(cx, cy) < maxD * 0.7) [cx, cy] = sp.mm(mi % sp.w, (mi / sp.w) | 0);
+      const hr = p.holeD / 2, n = +p.holes;
+      const ang = (n === 2 ? +p.angle2 : +p.angle4) * Math.PI / 180;
+      const centersFor = sp2 => n === 2
+        ? [-1, 1].map(k => [cx + k * sp2 / 2 * Math.cos(ang), cy + k * sp2 / 2 * Math.sin(ang)])
+        : [0, 1, 2, 3].map(k => { const a = ang + Math.PI / 4 + k * Math.PI / 2, rr = sp2 / Math.SQRT2; return [cx + rr * Math.cos(a), cy + rr * Math.sin(a)]; });
+      const minSpace = p.holeD + 0.9;
+      const fits = (sp2, need) => centersFor(sp2).every(([x, y]) => at(x, y) >= need);
+      let space = Math.max(p.holeSpace, minSpace), placed = false;
+      for (const need of [dish ? p.rimW + W + hr + 0.3 : -1, Math.max(r, 0.6) + hr + 0.8, hr + 0.6].filter(v => v > 0)) {
+        for (let s2 = space; s2 >= minSpace - 1e-6; s2 -= 0.1) if (fits(s2, need)) { space = s2; placed = true; break; }
+        if (placed) break;
+      }
+      if (!placed) { space = minSpace; warnings.push('纽扣太小或太细，扣眼放不下，孔会打穿到边上。把纽扣调大、孔调小，或者改成两孔。'); }
+      else if (space < p.holeSpace - 0.05) notes.push(`孔间距自动缩小到 ${r1(space)}mm，才能放进纽扣里。`);
+      const centers = centersFor(space);
+      const inDish = dish && centers.every(([x, y]) => at(x, y) >= p.rimW + W + hr);
+      const zTop = inDish ? T - D : T;       // 扣眼顶面的高度
+      const ch = Math.min(0.4, hr * 0.5);     // 扣眼两头倒一点角，缝线不容易磨断
+      const holeCache = new Map();
+      const holeAt = z => {
+        const extra = +Math.max(0, ch - z, ch - (zTop - z)).toFixed(3);
+        if (holeCache.has(extra)) return holeCache.get(extra);
+        const hf = sp.draw(c => { c.beginPath(); for (const [x, y] of centers) { c.moveTo(x + hr + extra, y); c.arc(x, y, hr + extra, 0, Math.PI * 2); } c.fill(); });
+        holeCache.set(extra, hf); return hf;
+      };
+
+      // ---- 线稿花纹 ----
+      let L = null;
+      const dd = Math.min(p.detailH, T - D - 0.8);
+      if (p.detail !== 'none') {
+        const clear = sp.draw(c => { c.beginPath(); for (const [x, y] of centers) { c.moveTo(x + hr + 0.8, y); c.arc(x, y, hr + 0.8, 0, Math.PI * 2); } c.fill(); });
+        L = F.sub(F.inter(f, inset(Math.max(r, 0.4))), clear);
+        if (!F.any(L)) { L = null; notes.push('线稿的线条都在边缘上，正面没有可以刻的花纹。'); }
+      }
+      const Lrim = L && dish ? F.inter(L, F.sub(sil, inset(p.rimW + W / 2))) : L;
+      const Ldish = L && dish ? F.inter(L, inset(p.rimW + W / 2)) : null;
+
+      // ---- 按高度切片：每一片算出截面 ----
+      const outerE = z => z < r ? r - Math.sqrt(Math.max(0, r * r - (r - z) ** 2)) : z > T - r ? r - Math.sqrt(Math.max(0, r * r - (z - (T - r)) ** 2)) : 0;
+      // 凹面：边框往里是一段余弦曲线的斜坡，再往里是平底
+      const dishCut = z => { const u = Math.min(1, (T - z) / D); return p.rimW + W * Math.acos(1 - 2 * u) / Math.PI; };
+      const section = z => {
+        let g = inset(outerE(z));
+        if (dish && z > T - D) g = F.sub(g, inset(dishCut(z)));
+        if (L && p.detail === 'engrave') {
+          if (dish) { if (z > T - dd) g = F.sub(g, Lrim); if (z > T - D - dd && Ldish) g = F.sub(g, Ldish); }
+          else if (z > T - dd) g = F.sub(g, L);
+        }
+        return F.sub(g, holeAt(z));
+      };
+      // 切片高度：圆角按等角度取点（看起来最圆），凹面、倒角各取几层
+      const breaks = new Set([0, T]);
+      const add = z => { if (z > 0 && z < T) breaks.add(+z.toFixed(4)); };
+      if (r > 0) { const k = Math.min(14, Math.max(4, Math.ceil(r * 9))); for (let i = 1; i < k; i++) { const th = i / k * Math.PI / 2; add(r * (1 - Math.cos(th))); add(T - r * (1 - Math.cos(th))); } add(r); add(T - r); }
+      if (dish) { const k = Math.min(10, Math.max(3, Math.ceil(D / 0.08))); for (let i = 0; i < k; i++) add(T - D + D * i / k); }
+      for (const z of [ch / 2, ch, zTop - ch, zTop - ch / 2, zTop]) add(z);
+      if (L && p.detail === 'engrave') { add(T - dd); if (dish) add(T - D - dd); }
+      const zs = [...breaks].sort((a, b) => a - b);
+      const feats = [];
+      for (let k = 0; k < zs.length - 1; k++) feats.push({ f: section((zs[k] + zs[k + 1]) / 2), z0: zs[k], z1: zs[k + 1] });
+      if (L && p.detail === 'raise') {
+        const topFace = inset(r);
+        if (dish) {
+          feats.push({ f: F.inter(Lrim, topFace), z0: T - 0.01, z1: T + dd });
+          if (Ldish) feats.push({ f: Ldish, z0: T - D - 0.01, z1: T - D + dd });
+        } else feats.push({ f: F.inter(L, topFace), z0: T - 0.01, z1: T + dd });
+      }
+      const geo = buildSolid(sp, feats);
+      if (!geo) throw new Error('没有生成出纽扣，检查一下参数');
+
+      // ---- 多颗：排成方阵 ----
+      let out = geo;
+      const cnt = Math.max(1, Math.round(p.count));
+      if (cnt > 1) {
+        geo.computeBoundingBox();
+        const b = geo.boundingBox, w = b.max.x - b.min.x + 4, h = b.max.y - b.min.y + 4, cols = Math.ceil(Math.sqrt(cnt));
+        const copies = [];
+        for (let i = 0; i < cnt; i++) copies.push(geo.clone().translate((i % cols) * w, -Math.floor(i / cols) * h, 0));
+        geo.dispose(); out = mergeGeos(copies);
+        out.computeBoundingBox(); const ob = out.boundingBox;
+        if (ob.max.x - ob.min.x > 250 || ob.max.y - ob.min.y > 250) warnings.push('这么多颗排不下 P1S 的打印板（256mm），减少数量或者分两次打。');
+      }
+
+      notes.unshift(
+        `${n === 2 ? '两' : '四'}孔，孔径 ${p.holeD}mm，孔间距 ${r1(space)}mm${inDish ? '，孔在凹面里' : ''}；孔两头倒了 ${r1(ch)}mm 的小角，缝线不容易磨断。`,
+        ...(bridged > 0 ? ['线稿外圈有缺口，已经自动补上再填成实心。'] : bridged < 0 ? ['线稿外圈缺口比较大，已经按整体外形补齐再填成实心。'] : []),
+        '正面朝上平放打印，不需要支撑。边缘圆滑时，下半圈是悬空的小斜面，0.2mm 层高打得很好；想要更圆润可以用 0.12mm 层高。',
+        '孔径 2mm 以下打出来可能稍微小一点，用 2mm 钻头或者牙签转一下就顺了。',
+        '纽扣要过水洗：PLA 别用烘干机和高温熨烫；常洗的衣服建议用 PETG。',
+      );
+      if (p.detail === 'engrave' && L) notes.push('凹刻花纹可以用丙烯或指甲油填色，更显花纹。');
+      return { parts: [{ geo: out, label: cnt > 1 ? `纽扣 ×${cnt}` : '纽扣' }], notes, warnings, colorChange: null, ...(bridged ? { bridged } : {}) };
     },
   },
 
@@ -573,6 +703,43 @@ function dotGauze(sp, p, free, region, lines) {
   else notes.push(`${{ dots: '波点纱', scatter: '自由波点', lacedot: '蕾丝波点', eyelet: '洞洞绣' }[p.fill]}：放了 ${n} 个${p.fill === 'eyelet' ? '洞' : '点'}${p.fill === 'scatter' ? '，拖“换一种撒法”可以重新随机' : ''}。${p.fill === 'scatter' || p.fill === 'dots' ? '点之间不相连，靠底下这层实心纱托住。' : ''}`);
   if (p.dotSize < 1.2 && p.dotH > 0) notes.push('点小于 1.2mm 时，凸起部分只有一两圈挤出线，打出来会更像小圆疙瘩；想要清楚的形状（小花、星星、爱心）建议 ≥ 2.5mm。');
   return { gauzeF, raised, meshInfo, notes, gap };
+}
+
+/** 线稿 → 实心外形：填满封闭区域；外圈有缺口时自动补上（闭运算，补不上就用凸包）。bridged: 0 没补 / >0 补的半径 / -1 凸包 */
+function solidify(sp, f) {
+  let sil = fillHoles(sp, f), bridged = 0;
+  const count = g => { let n = 0; for (let i = 0; i < g.length; i++) if (g[i] >= 0.5) n++; return n; };
+  const nf = count(f);
+  const base0 = count(sil);
+  // 本来就是实心的图（最粗的地方超过整体的 12%）就不用补缺口
+  let fx0 = sp.w, fx1 = -1, fy0 = sp.h, fy1 = -1;
+  for (let y = 0; y < sp.h; y++) for (let x = 0; x < sp.w; x++) if (f[y * sp.w + x] >= 0.5) { if (x < fx0) fx0 = x; if (x > fx1) fx1 = x; if (y < fy0) fy0 = y; if (y > fy1) fy1 = y; }
+  const dF = distInside(sp, f); let thick = 0; for (let i = 0; i < dF.length; i++) if (dF[i] > thick) thick = dF[i];
+  const isSolid = thick > 0.12 * Math.max(fx1 - fx0, fy1 - fy0) * sp.res;
+  // 补出来的形状不能比原图的外框大（否则就是把整张画布填满了）
+  const inBox = g => { for (let y = 0; y < sp.h; y++) for (let x = 0; x < sp.w; x++) if (g[y * sp.w + x] >= 0.5 && (x < fx0 - 2 || x > fx1 + 2 || y < fy0 - 2 || y > fy1 + 2)) return false; return true; };
+  if (!isSolid && base0 < nf * 1.3) {
+    // 线条几乎没围出区域 = 外圈有缺口：线条“膨胀—填满—收回”（闭运算）把缺口补上；面积明显变大才算真的补上了
+    const need = Math.max(nf * 1.3, base0 * 1.6);
+    {
+      for (const r of [0.6, 1.2, 2, 3, 4.5, 6, 8, 11, 15]) {
+        const closed = erode(sp, fillHoles(sp, dilate(sp, f, r)), r);
+        if (count(closed) >= need && inBox(closed)) { sil = F.union(closed, f); bridged = r; break; }
+      }
+      if (!bridged) {
+        // 缺口太大：按整体外形（凸包）补齐
+        const pts = [];
+        for (let y = 0; y < sp.h; y += 2) for (let x = 0; x < sp.w; x += 2) if (f[y * sp.w + x] >= 0.5) pts.push(sp.mm(x, y));
+        const hull = convexHull(pts);
+        if (hull.length >= 3) {
+          const hf = sp.draw(c => { c.beginPath(); hull.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); });
+          if (count(hf) >= need) { sil = F.union(hf, f); bridged = -1; }
+        }
+      }
+    }
+
+  }
+  return { sil, bridged };
 }
 
 /** 网纱图案（覆盖整个网格范围的细线），之后再和纱层区域取交集 */
