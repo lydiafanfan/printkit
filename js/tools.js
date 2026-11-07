@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=19';
-import { PARTS, getFit } from './parts.js?v=19';
-import { JOINER } from './joiner.js?v=19';
-import { PARTS2 } from './parts2.js?v=19';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=19';
+import { FRAME_STUDIO } from './framestudio.js?v=20';
+import { PARTS, getFit } from './parts.js?v=20';
+import { JOINER } from './joiner.js?v=20';
+import { PARTS2 } from './parts2.js?v=20';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=20';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -405,8 +405,9 @@ export const TOOLS = [
     ],
     build(art, img, p) {
       const { sp, f } = placeArt(art, img, p.size, 3);
-      const { sil, bridged } = solidify(sp, f);
-      const dIn = distInside(sp, sil), N = dIn.length, res = sp.res;
+      let { sil, bridged } = solidify(sp, f);
+      let dIn = distInside(sp, sil);
+      const N = dIn.length, res = sp.res;
       const T = p.thick, warnings = [], notes = [];
       // 内缩 e 毫米后的形状（用一张距离场，边缘抗锯齿）
       const inset = e => { const o = new Float32Array(N); for (let i = 0; i < N; i++) { const v = dIn[i] / res - e / res; o[i] = v <= 0 ? 0 : v >= 1 ? 1 : v; } return o; };
@@ -421,23 +422,58 @@ export const TOOLS = [
       const D = Math.min(p.dishD, T - 1.2), W = Math.max(D * 1.4, 0.8);   // W：凹面斜坡的宽度
       if (dish && maxD < p.rimW + W + p.holeD) { dish = false; notes.push('纽扣太小，放不下内凹和边框，已改成平面。'); }
 
-      // ---- 扣眼位置：形状中心；中心太靠边（比如月牙形）就用离边最远的点 ----
-      let [cx, cy] = centroid(sp, sil);
-      if (at(cx, cy) < maxD * 0.7) [cx, cy] = sp.mm(mi % sp.w, (mi / sp.w) | 0);
+      // ---- 扣眼位置：一组孔整体围着形状的中心（重心）排；中心太窄放不下时，整组只在中心附近挪一点，
+      //      实在不行才往远处找。对称的图优先留在对称轴上 ----
+      const [gx, gy] = centroid(sp, sil);
       const hr = p.holeD / 2, n = +p.holes;
       const ang = (n === 2 ? +p.angle2 : +p.angle4) * Math.PI / 180;
-      const centersFor = sp2 => n === 2
-        ? [-1, 1].map(k => [cx + k * sp2 / 2 * Math.cos(ang), cy + k * sp2 / 2 * Math.sin(ang)])
-        : [0, 1, 2, 3].map(k => { const a = ang + Math.PI / 4 + k * Math.PI / 2, rr = sp2 / Math.SQRT2; return [cx + rr * Math.cos(a), cy + rr * Math.sin(a)]; });
+      const offs = sp2 => n === 2
+        ? [-1, 1].map(k => [k * sp2 / 2 * Math.cos(ang), k * sp2 / 2 * Math.sin(ang)])
+        : [0, 1, 2, 3].map(k => { const a = ang + Math.PI / 4 + k * Math.PI / 2, rr = sp2 / Math.SQRT2; return [rr * Math.cos(a), rr * Math.sin(a)]; });
       const minSpace = p.holeD + 0.9;
-      const fits = (sp2, need) => centersFor(sp2).every(([x, y]) => at(x, y) >= need);
-      let space = Math.max(p.holeSpace, minSpace), placed = false;
-      for (const need of [dish ? p.rimW + W + hr + 0.3 : -1, Math.max(r, 0.6) + hr + 0.8, hr + 0.6].filter(v => v > 0)) {
-        for (let s2 = space; s2 >= minSpace - 1e-6; s2 -= 0.1) if (fits(s2, need)) { space = s2; placed = true; break; }
-        if (placed) break;
+      const cands = [];
+      { const lim = p.size / 2, st = Math.max(0.2, p.size / 120);
+        for (let dy = -lim; dy <= lim + 1e-9; dy += st) for (let dx = -lim; dx <= lim + 1e-9; dx += st) {
+          const d = Math.hypot(dx, dy); if (d > lim) continue;
+          const onAxis = Math.abs(dx) < st / 2 || Math.abs(dy) < st / 2;
+          cands.push({ x: gx + dx, y: gy + dy, d, cost: d + (onAxis ? 0 : 0.35) });
+        }
+        cands.sort((a, b) => a.cost - b.cost); }
+      const near = p.size * 0.15;
+      const needs = [dish ? p.rimW + W + hr + 0.3 : -1, Math.max(r, 0.6) + hr + 0.8].filter(v => v > 0), needMin = hr + 0.6;
+      let space = Math.max(p.holeSpace, minSpace), cx = gx, cy = gy, placed = false;
+      const search = (maxD, needList) => {
+        for (const need of needList) for (let s2 = space; s2 >= minSpace - 1e-6; s2 -= 0.1) {
+          const o = offs(s2);
+          for (const c of cands) {
+            if (c.cost > maxD + 0.35) break; if (c.d > maxD) continue;
+            if (o.every(([ox, oy]) => at(c.x + ox, c.y + oy) >= need)) { space = s2; cx = c.x; cy = c.y; return true; }
+          }
+        }
+        return false;
+      };
+      let filled = 0;
+      placed = search(near, needs);
+      if (!placed) {
+        // 中间太窄（比如蝴蝶四片翅膀只在中间碰一点）：只在中心附近把缝隙补实（像翅膀之间连一层蹼），
+        // 扣眼就能留在正中间，腰部也更结实，不容易从中间断开
+        const ext = (n === 4 ? space / Math.SQRT2 : space / 2) + hr + 2.2;
+        for (const rc of [0.8, 1.2, 1.8, 2.5, 3.5, 5].filter(v => v <= p.size * 0.2)) {
+          const closed = erode(sp, fillHoles(sp, dilate(sp, sil, rc)), rc);
+          const sil2 = F.union(sil, F.inter(closed, sp.circle(gx, gy, ext + rc)));
+          const keep = dIn; dIn = distInside(sp, sil2);
+          if (search(near, needs)) { sil = sil2; filled = rc; placed = true; break; }
+          dIn = keep;
+        }
       }
+      placed ||= search(near, [needMin]) || search(Infinity, needs) || search(Infinity, [needMin]);
+      if (filled) notes.push('图案中间太窄放不下扣眼，已经在中心附近把缝隙补实一点，扣眼留在正中间，纽扣也更结实。');
       if (!placed) { space = minSpace; warnings.push('纽扣太小或太细，扣眼放不下，孔会打穿到边上。把纽扣调大、孔调小，或者改成两孔。'); }
-      else if (space < p.holeSpace - 0.05) notes.push(`孔间距自动缩小到 ${r1(space)}mm，才能放进纽扣里。`);
+      else {
+        if (space < p.holeSpace - 0.05) notes.push(`孔间距自动缩小到 ${r1(space)}mm，才能放进纽扣里。`);
+        if (Math.hypot(cx - gx, cy - gy) > near) notes.push('形状中间太窄放不下扣眼，扣眼挪到了比较宽的地方。可以把孔调小、孔间距调小，或者换成两孔。');
+      }
+      const centersFor = sp2 => offs(sp2).map(([ox, oy]) => [cx + ox, cy + oy]);
       const centers = centersFor(space);
       const inDish = dish && centers.every(([x, y]) => at(x, y) >= p.rimW + W + hr);
       const zTop = inDish ? T - D : T;       // 扣眼顶面的高度
