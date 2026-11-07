@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=21';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=21';
+import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=22';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=22';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -32,8 +32,8 @@ export const FRAME_STUDIO = {
   defaults: {
     rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
-    holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, tol: 0.2, attach: 'glue',
-    keyhole: true, magnet: false, magN: '4', magD: 10, magT: 3, loop: false, loopD: 4,
+    holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue',
+    keyhole: true, magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
     stand: true, standStyle: 'arch', tilt: 12, tongueW: 30, tongueL: 8, tongueT: 3, baseW: 70, baseD: 40, baseH: 14,
   },
   groups: [
@@ -68,6 +68,7 @@ export const FRAME_STUDIO = {
       { k: 'slotT', label: '夹层厚度', hint: '照片 + 卡纸，一般 0.8–1.5', type: 'range', min: 0.4, max: 4, step: 0.1, unit: 'mm', show: p => p.holder !== 'none' },
       { k: 'wall', label: '外壁宽度', type: 'range', min: 2, max: 10, step: 0.5, unit: 'mm', show: p => p.holder !== 'none' },
       { k: 'backT', label: '背板厚度', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm', show: p => p.holder !== 'none' },
+      { k: 'cover', label: '夹层高度', hint: '从照片底边往上，夹住照片的多少。100% = 整张包住；调小更省料，照片上半部分只靠相框正面压住', type: 'range', min: 25, max: 100, step: 5, unit: '%', show: p => p.holder === 'full' || p.holder === 'half' },
       { k: 'rail', label: '背面卡边宽', type: 'range', min: 2, max: 15, step: 0.5, unit: 'mm', show: p => p.holder === 'half' },
       { k: 'tol', label: '后盖松紧', hint: '每边间隙，越小越紧', type: 'range', min: 0, max: 0.6, step: 0.05, unit: 'mm', show: p => p.holder === 'cover' },
       { k: 'attach', label: '装到相框上', type: 'seg', options: [['glue', '胶水粘'], ['pins', '定位销']], show: p => ['full', 'half', 'cover'].includes(p.holder) },
@@ -75,7 +76,8 @@ export const FRAME_STUDIO = {
     { title: '挂件 / 冰箱贴', params: [
       { k: 'keyhole', label: '钥匙孔挂钉', hint: '背面两个，挂在钉子上', type: 'toggle' },
       { k: 'magnet', label: '冰箱磁铁坑', type: 'toggle' },
-      { k: 'magN', label: '磁铁数量', type: 'seg', options: [['2', '上面 2 个'], ['4', '四角 4 个']], show: p => p.magnet },
+      { k: 'magN', label: '磁铁数量', type: 'seg', options: [['2', '上面 2 个'], ['3', '上 2 下 1'], ['4', '四角 4 个']], show: p => p.magnet },
+      { k: 'magPos', label: '磁铁位置', hint: '自动：每个磁铁各自去离角落最近、又够厚的地方，不强求对称', type: 'seg', options: [['auto', '跟着形状自动找'], ['sym', '左右对称']], show: p => p.magnet },
       { k: 'magD', label: '磁铁直径', type: 'range', min: 4, max: 20, step: 0.5, unit: 'mm', show: p => p.magnet },
       { k: 'magT', label: '磁铁厚度', type: 'range', min: 1, max: 5, step: 0.5, unit: 'mm', show: p => p.magnet },
       { k: 'loop', label: '顶部挂绳环', hint: '可以穿绳子或挂件', type: 'toggle' },
@@ -156,13 +158,18 @@ export const FRAME_STUDIO = {
     const P = { w: pw + 0.6, h: ph + 0.6 };
     const hasHolder = p.holder !== 'none';
     const hw = P.w / 2 + (hasHolder ? p.wall : 0), hh = P.h / 2 + (hasHolder ? p.wall : 0);
+    // 夹层高度：从照片底边往上只夹住一部分时，夹层上沿在 coverTop（y 向下为正）
+    const coverF = (p.holder === 'full' || p.holder === 'half') ? Math.max(0.25, Math.min(1, (p.cover ?? 100) / 100)) : 1;
+    const cut = coverF < 0.999, coverTop = cut ? P.h / 2 - coverF * P.h : -Infinity;
+    const holderTop = cut ? coverTop : -hh;
     // 跟随相框外形：夹层只保留在相框背面（往里缩 0.8mm）之内，边框窄的地方外壁自动变窄
     const follow = hasHolder && p.holderFit === 'follow' && ['full', 'half', 'cover'].includes(p.holder);
     const MINW = 0.8;   // 跟随时最少保留的外壁
     const bodyIn = follow ? erode(sp, body, 0.8) : null;
     const sticks = (ex, ey) => {
+      const y0 = Math.max(-ey, holderTop);
       let out = false;
-      for (let t = 0; t <= 1 && !out; t += 0.005) for (const [x, y] of [[-ex + 2 * ex * t, -ey], [-ex + 2 * ex * t, ey], [-ex, -ey + 2 * ey * t], [ex, -ey + 2 * ey * t]]) { const i = pix(x, y); if (i < 0 || body[i] < 0.5) { out = true; break; } }
+      for (let t = 0; t <= 1 && !out; t += 0.005) for (const [x, y] of [[-ex + 2 * ex * t, y0], [-ex + 2 * ex * t, ey], [-ex, y0 + (ey - y0) * t], [ex, y0 + (ey - y0) * t]]) { if (Math.abs(x) < P.w / 2 && Math.abs(y) < P.h / 2) continue; /* 在照片后面，挡住了 */ const i = pix(x, y); if (i < 0 || body[i] < 0.5) { out = true; break; } }
       return out;
     };
     if (hasHolder) {
@@ -175,15 +182,17 @@ export const FRAME_STUDIO = {
     const pinR = 1.45, insertSide = { top: 'top', left: 'left', right: 'right' }[p.insert];
     const pinOk = (x, y) => { for (let a = 0; a < 8; a++) { const t = a * Math.PI / 4, i = pix(x + Math.cos(t) * (pinR + 0.6), y + Math.sin(t) * (pinR + 0.6)); if (i < 0 || (bodyIn || body)[i] < 0.5) return false; } return true; };
     let pinList = pinSpots(P, p.wall), pinMiss = 0;
+    const pinTop = cut ? coverTop + Math.max(2.5, p.wall / 2) : -Infinity;   // 夹层只夹一部分时，上面两个销往下挪
+    if (cut) pinList = pinList.map(([x, y]) => [x, Math.max(y, pinTop)]);
     if (follow && p.attach === 'pins') {
       const o = p.wall / 2;
       pinList = [];
       for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
         let spot = null;
-        const X = sx * (P.w / 2 + o), Y = sy * (P.h / 2 + o);
+        const X = sx * (P.w / 2 + o), Y = Math.max(sy * (P.h / 2 + o), pinTop);
         for (let d = 0; d < Math.max(P.w, P.h) / 2 && !spot; d += 0.5) {
           if (pinOk(X, Y - sy * d) && Math.abs(Y - sy * d) <= P.h / 2 + o) spot = [X, Y - sy * d];
-          else if (!(p.holder !== 'cover' && sy < 0 && insertSide === 'top') && pinOk(X - sx * d, Y) && Math.abs(X - sx * d) <= P.w / 2 + o) spot = [X - sx * d, Y];
+          else if (!(sy < 0 && (cut || (p.holder !== 'cover' && insertSide === 'top'))) && pinOk(X - sx * d, Y) && Math.abs(X - sx * d) <= P.w / 2 + o) spot = [X - sx * d, Y];
         }
         if (spot) pinList.push(spot); else pinMiss++;
       }
@@ -196,7 +205,7 @@ export const FRAME_STUDIO = {
     const free = (x, y, need) => {
       const i = pix(x, y);
       if (i < 0 || inner[i] < 0.5 || hpx[i] < need) return false;
-      if (Math.abs(x) < hw + 1.5 && Math.abs(y) < hh + 1.5) return false;
+      if (Math.abs(x) < hw + 1.5 && y > holderTop - 1.5 && y < hh + 1.5) return false;
       if (p.stand && Math.abs(x) < p.tongueW / 2 + 2 && y > tongueY0 - 8) return false;
       return true;
     };
@@ -205,9 +214,54 @@ export const FRAME_STUDIO = {
       return free(cx, cy, need) && free(cx + r / 2, cy, need) && free(cx - r / 2, cy, need) && free(cx, cy + r / 2, need) && free(cx, cy - r / 2, need);
     };
     const back = [];   // 从背面挖掉的形状
+    const taken = [];  // 已经占用的背面位置 [x, y0, y1, r]：竖向胶囊
+    const clear = (x, y, rr) => taken.every(([tx, ty0, ty1, tr]) => Math.hypot(x - tx, y - Math.max(ty0, Math.min(ty1, y))) >= rr + tr + 1.2);
+    const magSpots = [];
+    if (p.magnet) {
+      const r = p.magD / 2 + 0.15, depth = p.magT + 0.2, need = depth + 0.8;
+      // 理想位置：外轮廓的角（上 2 / 上 2 下 1 / 四角）。每个磁铁去离理想位置最近、放得下的地方，不强求对称。
+      const anchors = { 2: [[cx0, cy0], [cx1, cy0]], 3: [[cx0, cy0], [cx1, cy0], [0, cy1]], 4: [[cx0, cy0], [cx1, cy0], [cx0, cy1], [cx1, cy1]] }[p.magN] || [];
+      const fits = (x, y) => fitsDisk(x, y, r, need) && clear(x, y, r);
+      const cands = [];
+      const st = Math.max(0.6, Math.min(1.2, r / 4));
+      for (let y = cy0 + r; y <= cy1 - r; y += st) for (let x = cx0 + r; x <= cx1 - r; x += st) if (fits(x, y)) cands.push([x, y]);
+      const sym = p.magPos === 'sym';
+      const candSet = sym ? cands.filter(([x, y]) => Math.abs(x) < 0.5 * st || fits(-x, y)) : cands;
+      const pick = (ax, ay, side) => {
+        let best = null, bd = Infinity;
+        for (const [x, y] of candSet) {
+          if (side && Math.sign(x) !== side) continue;
+          if (!clear(x, y, r)) continue;
+          const d = Math.hypot(x - ax, y - ay);
+          if (d < bd) { bd = d; best = [x, y]; }
+        }
+        return best;
+      };
+      const placed = magSpots;
+      const put = (x, y) => { placed.push([x, y]); taken.push([x, y, y, r]); };
+      let miss = 0;
+      if (sym) {
+        // 左边的锚点找位置，右边镜像；正中间的锚点放在中线上
+        for (const [ax, ay] of anchors) {
+          if (ax > 0) continue;
+          if (ax === 0) { const s0 = pick(0, ay, 0); const ok = s0 && Math.abs(s0[0]) < 0.5 * st; if (ok) put(0, s0[1]); else miss++; continue; }
+          const s0 = pick(ax, ay, -1);
+          if (s0 && clear(-s0[0], s0[1], r)) { put(s0[0], s0[1]); put(-s0[0], s0[1]); } else miss += 2;
+        }
+      } else {
+        for (const [ax, ay] of anchors) { const s0 = pick(ax, ay, ax === 0 ? 0 : Math.sign(ax)); if (s0) put(...s0); else miss++; }
+      }
+      for (const [x, y] of placed) back.push({ f: sp.circle(x, y, r), z0: 0, z1: depth });
+      if (miss) warnings.push(`有 ${miss} 个磁铁放不下（需要厚度 ≥ ${r1(need)}mm、直径 ${r1(2 * r)}mm 以上的边框位置）。可以换小一点/薄一点的磁铁，或加高边框层${sym ? '，或者把“磁铁位置”改成“跟着形状自动找”' : ''}。`);
+      if (placed.length) {
+        notes.push(`背面有 ${placed.length} 个 Ø${r1(p.magD)}×${r1(p.magT)}mm 的磁铁坑，挤一点胶把磁铁压进去。`);
+        const proud = p.holder === 'none' ? 0 : p.backT + p.slotT;
+        if (proud > 0.5) notes.push(`夹层比相框背面凸出约 ${r1(proud)}mm，贴冰箱时磁铁离冰箱也有这么远，吸力会弱一些；建议用钕磁铁（强磁）。`);
+      }
+    }
     if (p.keyhole) {
       const need = 2.6 + 0.6;
-      const okAt = (x, y) => fitsDisk(x, y, 4.6, need) && fitsDisk(x, y - 7, 4.6, need) && fitsDisk(x, y - 3.5, 4.6, need);
+      const okAt = (x, y) => clear(x, y - 3.5, 4.6 + 3.5) && fitsDisk(x, y, 4.6, need) && fitsDisk(x, y - 7, 4.6, need) && fitsDisk(x, y - 3.5, 4.6, need);
       let spot = null;
       for (let y = cy0 + 6; y < cy1 - 6 && !spot; y += 1) for (let x = cx1 - 6; x > 4; x -= 1) if (okAt(x, y) && okAt(-x, y)) { spot = [x, y]; break; }
       if (spot) {
@@ -215,23 +269,10 @@ export const FRAME_STUDIO = {
           const x = sx * spot[0], y = spot[1];
           back.push({ f: F.union(sp.circle(x, y, 4.2), sp.rect(x - 2.1, y - 7, 4.2, 7, 2.1)), z0: 0, z1: 1.0 });
           back.push({ f: F.union(sp.circle(x, y, 4.4), sp.rect(x - 4.4, y - 7.5, 8.8, 7.5, 4.4)), z0: 1.0, z1: 2.6 });
+          taken.push([x, y - 7, y, 4.6]);
         }
         notes.push('背面两个钥匙孔：钉子对准大圆孔按进去，再往下一拉就卡住。');
-      } else warnings.push(`没地方放钥匙孔：需要边框上有一块厚度 ≥ ${r1(need)}mm、且不被夹层挡住的地方。可以把边框层加高或换小一点的夹层外壁。`);
-    }
-    if (p.magnet) {
-      const r = p.magD / 2 + 0.15, depth = p.magT + 0.2, need = depth + 0.8;
-      const corners = p.magN === '2' ? [[-1, -1], [1, -1]] : [[-1, -1], [1, -1], [-1, 1], [1, 1]];
-      let miss = 0;
-      for (const [sx, sy] of corners) {
-        const x0 = sx < 0 ? cx0 : cx1, y0 = sy < 0 ? cy0 : cy1;
-        let spot = null;
-        for (let t = 0; t <= 1 && !spot; t += 0.01) { const x = x0 * (1 - t), y = y0 * (1 - t); if (fitsDisk(x, y, r, need)) spot = [x, y]; }
-        if (!spot) { miss++; continue; }
-        back.push({ f: sp.circle(spot[0], spot[1], r), z0: 0, z1: depth });
-      }
-      if (miss) warnings.push(`有 ${miss} 个磁铁放不下（需要厚度 ≥ ${r1(need)}mm 的边框位置）。可以换小一点/薄一点的磁铁，或加高边框层。`);
-      if (miss < corners.length) notes.push(`背面有 Ø${r1(p.magD)}×${r1(p.magT)}mm 的磁铁坑，挤一点胶把磁铁压进去。`);
+      } else warnings.push(`没地方放钥匙孔：需要边框上有一块厚度 ≥ ${r1(need)}mm、且不被夹层挡住的地方。可以把边框层加高或换小一点的夹层外壁${magSpots.length ? '；当冰箱贴用的话也可以直接关掉钥匙孔' : ''}。`);
     }
     if (p.attach === 'pins' && ['full', 'half', 'cover'].includes(p.holder)) {
       for (const [x, y] of pinList) back.push({ f: sp.circle(x, y, 1.45), z0: 0, z1: 2.4 });
@@ -263,6 +304,7 @@ export const FRAME_STUDIO = {
       // 夹层坐标 → 相框坐标：夹层翻过来贴，左右对调
       clip: follow ? (x, y) => { const i = pix(-x, y); return i < 0 ? 0 : bodyIn[i]; } : null,
       minW: MINW,
+      coverTop: cut ? coverTop : null,
     }));
     // ---- 底座零件 ----
     if (p.stand) {
@@ -283,7 +325,7 @@ export const FRAME_STUDIO = {
     if (hint) notes.push(hint);
     if (['full', 'half', 'cover'].includes(p.holder)) notes.push(p.attach === 'pins' ? '夹层上的 4 个定位销对准相框背面的小孔按进去，需要的话再点胶。' : '用 502 或 UHU 把夹层的平面粘到相框背面，对准窗口居中。');
     if (p.stand) notes.push(`底座单独打印，插片插进去后相框会后仰 ${p.tilt}°。插得太紧可以把“插片厚度”调小 0.2mm。`);
-    return { parts, notes, warnings, colorChange: null };
+    return { parts, notes, warnings, colorChange: null, magnets: magSpots };
   },
 };
 
@@ -312,6 +354,8 @@ function holderParts(p, P, opt = {}) {
     for (let j = 0; j < sp.h; j++) for (let i = 0; i < sp.w; i++) { const [x, y] = sp.mm(i, j); cf[j * sp.w + i] = opt.clip(x, y); }
     outer = F.union(F.inter(outer, cf), sp.rect(-P.w / 2 - opt.minW, -P.h / 2 - opt.minW, P.w + 2 * opt.minW, P.h + 2 * opt.minW, 0.6));
   }
+  // 夹层高度 < 100%：只保留照片下面那一段
+  if (opt.coverTop != null) outer = F.inter(outer, sp.rect(-ox - 3, opt.coverTop, 2 * ox + 6, oy + 3 - opt.coverTop));
   const side = { top: 'top', left: 'right', right: 'left' }[p.insert]; // 镜像
   const ext = 50;
   const extend = (x0, y0, x1, y1) => {
