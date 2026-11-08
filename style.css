@@ -420,3 +420,50 @@ details.adv[open] { padding-bottom: 2px; }
   .canvas-wrap .cp-pop { position: absolute; top: auto; right: 0; bottom: calc(100% + 8px); }
   .cp-lbl { display: inline; }
 }
+
+/* ---------- 相框批量生成 ---------- */
+.bt-open { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; background: var(--accent-soft); color: var(--accent-ink); border-radius: var(--r); padding: 10px 12px; margin: 0 0 6px; text-align: left; font-weight: 600; font-size: 13px; transition: background .15s, box-shadow .15s; box-shadow: inset 0 0 0 1px rgba(255, 95, 61, .18); }
+.bt-open:hover { background: #ffe7de; }
+.bt-open svg { width: 20px; height: 20px; flex: none; }
+.bt-open span { flex: 1; min-width: 0; }
+.bt-open small { display: block; font-weight: 400; font-size: 11.5px; color: var(--ink2); margin-top: 1px; }
+.bt-open em { font-style: normal; font-size: 11.5px; background: var(--accent); color: #fff; border-radius: 999px; padding: 1px 8px; flex: none; }
+.modal.batch { width: min(880px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+.bt-in { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.bt-head { display: flex; align-items: flex-start; gap: 12px; padding: 20px 22px 12px; }
+.bt-head > div { flex: 1; min-width: 0; }
+.bt-head h3 { margin: 0 0 4px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-head p { margin: 0; color: var(--ink2); font-size: 12.5px; }
+.bt-x { width: 30px; height: 30px; border: 0; border-radius: 8px; background: var(--sunken); color: var(--ink2); font-size: 18px; line-height: 1; flex: none; }
+.bt-x:hover { background: var(--line); color: var(--ink); }
+.bt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 4px 22px 16px; overflow-y: auto; min-height: 180px; }
+.bt-card { display: flex; flex-direction: column; gap: 3px; background: var(--surface); border-radius: var(--r); padding: 8px; box-shadow: 0 0 0 1px var(--line); font-size: 12px; min-width: 0; }
+.bt-card.need { box-shadow: 0 0 0 1.5px rgba(200, 106, 28, .45); }
+.bt-card b { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; }
+.bt-thumb { height: 150px; border-radius: 8px; background: var(--sunken); display: grid; place-items: center; overflow: hidden; }
+.bt-thumb .hm-stage { max-height: 100%; }
+.bt-thumb img { max-width: 100%; max-height: 142px; border-radius: 4px; }
+.win-box.static { cursor: default; pointer-events: none; box-shadow: 0 0 0 9999px rgba(30, 20, 10, .14); border-width: 1.5px; }
+.bt-st, .bt-out { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-st.ok, .bt-out.ok { color: var(--ok); font-weight: 600; }
+.bt-st.bad, .bt-out.bad { color: var(--warn); font-weight: 600; }
+.bt-acts { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.bt-acts .chip:disabled, .bt-acts .link-btn:disabled { opacity: .4; }
+.bt-add { min-height: 230px; border: 1.5px dashed #dcd6cc; border-radius: var(--r); background: var(--sunken); color: var(--ink2); display: grid; place-content: center; justify-items: center; gap: 2px; font-weight: 600; font-size: 13px; }
+.bt-add:hover:not(:disabled) { border-color: var(--accent); color: var(--ink); }
+.bt-add svg { width: 24px; height: 24px; color: var(--accent); margin-bottom: 4px; }
+.bt-add small { font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.bt-foot { position: relative; display: flex; align-items: center; gap: 10px; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+.bt-sum { flex: 1; color: var(--ink2); font-size: 12.5px; }
+.bt-bar { position: absolute; left: 0; right: 0; top: -1px; height: 3px; background: var(--line); }
+.bt-bar i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+.bt-edit { display: grid; place-items: center; background: var(--sunken); margin: 0 22px 16px; border-radius: var(--r); padding: 14px; min-height: 240px; overflow: hidden; }
+.bt-edit img { max-width: 100%; max-height: min(58vh, 560px); border-radius: 6px; }
+.bt-spin { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); animation: btspin .8s linear infinite; }
+@keyframes btspin { to { transform: rotate(360deg); } }
+@media (max-width: 560px) {
+  .bt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 4px 16px 12px; }
+  .bt-head, .bt-foot { padding-left: 16px; padding-right: 16px; }
+  .bt-foot { flex-wrap: wrap; }
+  .bt-edit { margin: 0 16px 12px; }
+}

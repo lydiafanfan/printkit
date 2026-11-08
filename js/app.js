@@ -1,12 +1,13 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=25';
-import { TOOLS } from './tools.js?v=25';
-import { SAMPLES } from './samples.js?v=25';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=25';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=25';
-import { getFit, setFit } from './parts.js?v=25';
-import { export3MF } from './export3mf.js?v=25';
+import { Viewer, Thumbnailer } from './viewer.js?v=26';
+import { TOOLS } from './tools.js?v=26';
+import { SAMPLES } from './samples.js?v=26';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=26';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=26';
+import { getFit, setFit } from './parts.js?v=26';
+import { export3MF } from './export3mf.js?v=26';
+import { makeBatch } from './batch.js?v=26';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -319,12 +320,15 @@ function hmCardHTML(p) {
     <button class="dropzone small" id="pick">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
       上传相框图<small>白色最高、灰色次高、黑色或透明为空；白底彩色图也可以</small></button>
+    <button class="bt-open" id="hmBatch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg>
+      <span>批量生成<small>一次放多张图，用现在的参数各做一个，打包下载</small></span>${batch?.count ? `<em>${batch.count} 张</em>` : ''}</button>
     <button class="link-btn" id="hmSample">换回示例图</button>`);
 }
 // 手动框选：拖动 / 缩放窗口框
-$('#panel').addEventListener('pointerdown', e => {
-  const boxEl = e.target.closest('.win-box');
+document.addEventListener('pointerdown', e => {
+  const boxEl = e.target.closest('.win-box:not(.static)');
   if (!boxEl) return;
+  const inBatch = !!boxEl.closest('#batch');
   e.preventDefault();
   const stage = boxEl.parentElement, R = stage.getBoundingClientRect(), h = e.target.dataset.h || null;
   const st = { x: e.clientX, y: e.clientY, l: boxEl.offsetLeft, t: boxEl.offsetTop, w: boxEl.offsetWidth, h: boxEl.offsetHeight };
@@ -345,7 +349,9 @@ $('#panel').addEventListener('pointerdown', e => {
   };
   const up = () => {
     boxEl.removeEventListener('pointermove', move); boxEl.removeEventListener('pointerup', up); boxEl.removeEventListener('pointercancel', up);
-    setP('winBox', { cx: (cur.l + cur.w / 2) / R.width, cy: (cur.t + cur.h / 2) / R.height, w: cur.w / R.width, h: cur.h / R.height });
+    const nb = { cx: (cur.l + cur.w / 2) / R.width, cy: (cur.t + cur.h / 2) / R.height, w: cur.w / R.width, h: cur.h / R.height };
+    if (inBatch) { batch.setBox(nb); return; }
+    setP('winBox', nb);
     refreshGroups(); rebuild();
   };
   boxEl.addEventListener('pointermove', move); boxEl.addEventListener('pointerup', up); boxEl.addEventListener('pointercancel', up);
@@ -495,6 +501,7 @@ $('#panel').addEventListener('click', async e => {
   if (b.dataset.tab) { S.tab = b.dataset.tab; if (S.tab === 'text') { textChanged(true); } renderPanel(); return; }
   if (b.dataset.sample) { await loadSample(b.dataset.sample); renderPanel(); rebuild(true); return; }
   if (b.id === 'pick') { $('#fileIn').click(); return; }
+  if (b.id === 'hmBatch') { batch.open(); if (!batch.count) batch.pick(); return; }
   if (b.id === 'hmSample') { S.hmArt = sampleHeightmap(); setP('levelH', []); setP('winBox', null); setP('winMode', 'auto'); renderPanel(); rebuild(true); return; }
   if (b.id === 'hmFlip') {
     const { info } = hmInfo(P());
@@ -564,8 +571,10 @@ addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => {
   e.preventDefault(); dragDepth = 0; $('#dropVeil').classList.remove('on');
-  if (!$('#studio').hidden && tool().kind === 'mesh') runAct('files', [...e.dataTransfer.files]);
-  else useFile(e.dataTransfer.files[0]);
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!$('#studio').hidden && tool().kind === 'mesh') runAct('files', files);
+  else if ($('#batch').open || (!$('#studio').hidden && tool().kind === 'heightmap' && files.length > 1)) batch.open(files);
+  else useFile(files[0]);
 });
 
 // ---------- 生成 ----------
@@ -649,18 +658,26 @@ function renderFmt() {
 }
 renderFmt();
 $('#fmtSeg').addEventListener('click', e => { const b = e.target.closest('[data-fmt]'); if (!b) return; S.fmt = b.dataset.fmt; LS.set('fmt', S.fmt); renderFmt(); });
-function partColors() {
-  return S.parts.map((p, i) => p.color || ((p.second || p.translucent || (p.keepPlace && i > 0)) ? S.c2 : S.c1));
+function partColors(parts = S.parts) {
+  return parts.map((p, i) => p.color || ((p.second || p.translucent || (p.keepPlace && i > 0)) ? S.c2 : S.c1));
 }
+/** 生成结果 → 文件数据（3MF / STL）。下载和批量生成共用 */
+function exportPack(res, fmt = S.fmt) {
+  if (!res.keepLayout) layoutParts(res.parts);
+  let parts = res.parts, colors = partColors(res.parts);
+  if (res.exportParts) { parts = res.exportParts(); layoutParts(parts); colors = parts.map((_, i) => res.parts[i]?.color || colors[0]); }
+  const data = fmt === '3mf' ? export3MF(parts, colors) : exportSTL(parts);
+  if (parts !== res.parts) parts.forEach(pt => pt.geo.dispose());
+  return { data, ext: fmt };
+}
+const batch = makeBatch({ S, P, tool, toast, exportPack });
+$('#batch').addEventListener('close', () => { if (!$('#studio').hidden && tool().kind === 'heightmap') refreshGroups(); });
 $('#download').addEventListener('click', () => {
   if (!S.parts.length) return;
   const d = new Date();
   const name = `${tool().name}-${d.getMonth() + 1}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
   const is3mf = S.fmt === '3mf';
-  let parts = S.parts, colors = partColors();
-  if (lastResult?.exportParts) { parts = lastResult.exportParts(); layoutParts(parts); colors = parts.map((_, i) => S.parts[i]?.color || colors[0]); }
-  const data = is3mf ? export3MF(parts, colors) : exportSTL(parts);
-  if (parts !== S.parts) parts.forEach(pt => pt.geo.dispose());
+  const { data } = exportPack({ parts: S.parts, keepLayout: true, exportParts: lastResult?.exportParts }, S.fmt);
   const blob = new Blob([data], { type: is3mf ? 'model/3mf' : 'model/stl' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

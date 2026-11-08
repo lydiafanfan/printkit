@@ -8,8 +8,8 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { Space, F, distInside } from './engine.js?v=25';
-import { getFit } from './parts.js?v=25';
+import { Space, F, distInside } from './engine.js?v=26';
+import { getFit } from './parts.js?v=26';
 
 const MANIFOLD_URL = new URL('../vendor/manifold/manifold.js', import.meta.url).href; // 自带一份，不依赖外部 CDN
 let W = null;
