@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=24';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg } from './heightmap.js?v=24';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=25';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg } from './heightmap.js?v=25';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -31,7 +31,7 @@ export const FRAME_STUDIO = {
   tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
   defaults: {
     bgAuto: true, winMode: 'auto', winBox: null, winShape: 'round', winR: 3,
-    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', levelH: [], maxH: 6, minH: 3,
+    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', flatH: 4, levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue',
     keyhole: true, keyPos: 'top', keyN: '2', magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
@@ -39,7 +39,8 @@ export const FRAME_STUDIO = {
   },
   groups: [
     { title: '高度', params: [
-      { k: 'hmode', label: '高度方式', type: 'seg', options: [['levels', '按颜色分层'], ['smooth', '按亮度渐变']] },
+      { k: 'hmode', label: '高度方式', hint: '分层：不同颜色 / 灰度做成不同高度；一样高：整个相框一个平面', type: 'seg', options: [['levels', '按颜色分层'], ['smooth', '按亮度渐变'], ['flat', '全部一样高']] },
+      { k: 'flatH', label: '相框高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'flat' },
       { k: 'levelH', type: 'levels', show: p => p.hmode === 'levels' },
       { k: 'maxH', label: '最亮处高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'minH', label: '最暗处高度', type: 'range', min: 0.6, max: 10, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
@@ -127,7 +128,8 @@ export const FRAME_STUDIO = {
 
     // ---- 层高 ----
     let bands;
-    if (p.hmode === 'levels') {
+    if (p.hmode === 'flat') bands = [{ lo: p.emptyT, hi: Infinity, h: p.flatH }];
+    else if (p.hmode === 'levels') {
       const H = Array.isArray(p.levelH) && p.levelH.length === hm.levels.length ? p.levelH : defaultHeights(hm.levels.length);
       bands = hm.levels.map((l, j) => ({ lo: l.lo, hi: l.hi, h: H[j] }));
     } else {
@@ -173,6 +175,32 @@ export const FRAME_STUDIO = {
     for (let i = 0; i < b.length; i++) hpx[i] = hOf(b[i]);
     const feats = bands.map(bd => ({ f: bandField(b, bd.lo, bd.hi), z0: 0, z1: bd.h }));
     const minBodyH = Math.min(...bands.map(bd => bd.h));
+    // 去掉颜色交界处的细条：抗锯齿 / 平滑边缘会在两种颜色之间留下一两个像素宽的“过渡色”，
+    // 它会被分到别的层，变成一圈很薄的高低台阶。每层先腐蚀再膨胀（开运算），窄于 ~0.5mm 的细条去掉，
+    // 去掉的地方并到旁边最近的那一层，外形不变。
+    if (p.hmode === 'levels' && bands.length > 1 && !p._noClean) {
+      const T = Math.max(0.25, sp.res * 1.2);
+      for (const ft of feats) {
+        const o = dilate(sp, erode(sp, ft.f, T), T);
+        for (let i = 0; i < o.length; i++) if (o[i] < ft.f[i]) ft.f[i] = o[i];
+      }
+      // 被去掉的细条并到旁边最近的那一层（多源 BFS），不留凹槽也不留台阶
+      const n = body.length, lab = new Int8Array(n).fill(-1), q = new Int32Array(n);
+      let qh = 0, qt = 0;
+      for (let i = 0; i < n; i++) {
+        let best = -1, bv = 0.5;
+        for (let k = 0; k < feats.length; k++) if (feats[k].f[i] >= bv) { bv = feats[k].f[i]; best = k; }
+        lab[i] = best;
+        if (best >= 0) q[qt++] = i;
+      }
+      while (qh < qt) {
+        const i = q[qh++], x = i % sp.w;
+        for (const j of [x > 0 ? i - 1 : -1, x < sp.w - 1 ? i + 1 : -1, i - sp.w, i + sp.w]) {
+          if (j < 0 || j >= n || lab[j] >= 0 || body[j] < 0.5) continue;
+          lab[j] = lab[i]; feats[lab[i]].f[j] = Math.max(feats[lab[i]].f[j], body[j]); q[qt++] = j;
+        }
+      }
+    }
 
     // 坐标 → 像素
     const pix = (x, y) => { const px = Math.floor((x - sp.x0) / sp.res), py = Math.floor((y - sp.y0) / sp.res); return px < 0 || py < 0 || px >= sp.w || py >= sp.h ? -1 : py * sp.w + px; };

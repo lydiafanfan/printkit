@@ -3,7 +3,7 @@
  * 白色 = 最高，灰色 = 次高 …… 黑色 / 透明 = 空。
  * 图中间被实体包围的最大空区域 = 相片窗口。
  */
-import { Art } from './engine.js?v=24';
+import { Art } from './engine.js?v=25';
 
 // ---------- 旋转 ----------
 const rotCache = new WeakMap();
@@ -68,6 +68,16 @@ export function prepBg(art) {
   for (const i of border) if (near[i] && !lab[i]) for (const j of flood(i, 1)) kill[j] = 1;
   let id = 1;
   for (let i = 0; i < n; i++) if (near[i] && !lab[i]) { const l = flood(i, ++id); if (l.length >= n * 0.01) for (const j of l) kill[j] = 1; }
+  // 背景和图案之间的抗锯齿过渡色（偏向背景色的那一两圈）也去掉，免得外缘多出一圈别的高度
+  for (let pass = 0; pass < 2; pass++) {
+    const add = [];
+    for (let i = 0; i < n; i++) {
+      if (kill[i] || d[i * 4 + 3] < 8) continue;
+      const x = i % cw;
+      if (((x > 0 && kill[i - 1]) || (x < cw - 1 && kill[i + 1]) || (i >= cw && kill[i - cw]) || (i < n - cw && kill[i + cw])) && diff(i) < 140) add.push(i);
+    }
+    for (const i of add) kill[i] = 1;
+  }
   // 3) 输出：背景透明，其余转灰度 0.2–1
   for (let i = 0; i < n; i++) {
     if (kill[i]) { d[i * 4 + 3] = 0; continue; }
