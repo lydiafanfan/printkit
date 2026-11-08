@@ -3,14 +3,16 @@
  * 多张图用同一套参数，各做一个相框，打包成一个 zip。
  * 为了省内存，每张图只在分析 / 生成的时候读进来，用完就丢，只留缩略图。
  */
-import { artFromFile } from './engine.js?v=26';
-import { previewHM } from './heightmap.js?v=26';
+import { artFromFile } from './engine.js?v=27';
+import { previewHM } from './heightmap.js?v=27';
+import { estimate } from './estimate.js?v=27';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const tick = () => new Promise(r => setTimeout(r, 0));
 const pct = v => (v * 100).toFixed(3) + '%';
 const HANDLES = ['nw', 'ne', 'sw', 'se'].map(h => `<i data-h="${h}"></i>`).join('');
+const fmtG = v => v >= 100 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toFixed(1);
 const IMG_RE = /\.(png|jpe?g|webp)$/i;
 
 /** deps: S（状态）、P()（当前参数）、tool()、toast(msg)、exportPack(res, fmt) → {data, ext} */
@@ -19,6 +21,7 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
   const B = { items: [], sig: '', edit: null, running: false, done: 0, total: 0 };
   let uid = 0, chain = Promise.resolve();
 
+  const totalG = () => B.items.reduce((a, i) => a + (i.out?.g || 0), 0);
   const itemP = it => ({ ...P(), winMode: it.mode, winBox: it.box });
   const sigOf = () => { const p = { ...P() }; delete p.winMode; delete p.winBox; return JSON.stringify([p, S.img, S.fmt]); };
   const boxOf = b => ({ cx: b.cx, cy: b.cy, w: b.w, h: b.h });
@@ -57,6 +60,8 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
       B.sig = sig;
       B.items.forEach(it => { it.out = null; queue(it); });
     }
+    const es = JSON.stringify(S.est);
+    if (es !== B.estSig) { B.estSig = es; B.items.forEach(it => { it.out = null; }); }
     B.edit = null;
     if (!dlg.open) dlg.showModal();
     if (files?.length) add(files);
@@ -73,7 +78,7 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
     }[it.state];
     const out = !it.out ? '' : it.out.err
       ? `<span class="bt-out bad" title="${esc(it.out.err)}">没生成：${esc(it.out.err)}</span>`
-      : `<span class="bt-out ok" title="${esc(it.out.warns.join('\n'))}">✓ 已生成${it.out.warns.length ? ` · ${it.out.warns.length} 条提醒` : ''}</span>`;
+      : `<span class="bt-out ok" title="${esc(it.out.warns.join('\n'))}">✓ 已生成${it.out.g != null ? ` · ${fmtG(it.out.g)} g` : ''}${it.out.warns.length ? ` · ${it.out.warns.length} 条提醒` : ''}</span>`;
     const box = it.thumb && it.mode === 'manual' && it.box
       ? `<div class="win-box static ${oval()}" style="left:${pct(it.box.cx - it.box.w / 2)};top:${pct(it.box.cy - it.box.h / 2)};width:${pct(it.box.w)};height:${pct(it.box.h)}"></div>` : '';
     const canEdit = !B.running && (it.state === 'ready' || it.state === 'need');
@@ -94,7 +99,7 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
     const ext = S.fmt.toUpperCase();
     const sum = B.running ? `正在生成 ${B.done + 1} / ${B.total}…`
       : !its.length ? '还没有图片'
-      : [loading && `${loading} 张分析中`, `${ready} 张可以生成`, need && `${need} 张没框窗口，会跳过`].filter(Boolean).join(' · ');
+      : [loading && `${loading} 张分析中`, `${ready} 张可以生成`, need && `${need} 张没框窗口，会跳过`, totalG() && `上次生成共约 ${fmtG(totalG())} g ${S.est.mat}`].filter(Boolean).join(' · ');
     const grid = dlg.querySelector('.bt-grid'), y = grid ? grid.scrollTop : 0;
     dlg.innerHTML = `<div class="bt-in">
       <div class="bt-head"><div><h3>批量生成相框</h3>
@@ -164,15 +169,18 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
         const art = await artFromFile(it.file);
         const res = t.build(art, S.img, itemP(it));
         const { data, ext } = exportPack(res, fmt);
+        let est = null;
+        try { est = estimate(res.parts, S.est); } catch { }
         res.parts.forEach(pt => pt.geo.dispose());
         const base = it.name.replace(/\.[^.]+$/, '') || '相框';
         let nm = base, k = 2;
         while (used.has(nm)) nm = `${base}-${k++}`;
         used.add(nm);
         files[`${nm}.${ext}`] = data instanceof Uint8Array ? data : new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
-        it.out = { warns: res.warnings || [] };
+        it.out = { warns: res.warnings || [], g: est?.g ?? null, rows: est?.rows || [] };
         ok++;
-        log.push(`✓ ${it.name} → ${nm}.${ext}${it.mode === 'manual' ? '（手动框的窗口）' : ''}`, ...it.out.warns.map(w => `    提醒：${w}`));
+        const gTxt = est ? ` · 约 ${fmtG(est.g)} g（${est.rows.map(r => `${r.label} ${fmtG(r.g)}`).join('，')}）` : '';
+        log.push(`✓ ${it.name} → ${nm}.${ext}${it.mode === 'manual' ? '（手动框的窗口）' : ''}${gTxt}`, ...it.out.warns.map(w => `    提醒：${w}`));
       } catch (e) {
         it.out = { err: e.message || String(e) };
         log.push(`✗ ${it.name}：${it.out.err}`);
@@ -184,7 +192,9 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
     B.running = false;
     if (ok) {
       const d = new Date(), stamp = `${d.getMonth() + 1}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-      files['生成记录.txt'] = strToU8(`相框工作室 · 批量生成 ${d.toLocaleString('zh-CN')}\n共 ${B.items.length} 张，生成 ${ok} 个\n\n${log.join('\n')}\n`);
+      const tg = totalG(), e = S.est;
+      const gLine = tg ? `\n耗材估算：共约 ${fmtG(tg)} g ${e.mat}（填充 ${e.infill}% · 墙 ${e.walls} 层，按 P1S 0.20mm 标准估算，以切片软件为准）` : '';
+      files['生成记录.txt'] = strToU8(`相框工作室 · 批量生成 ${d.toLocaleString('zh-CN')}\n共 ${B.items.length} 张，生成 ${ok} 个${gLine}\n\n${log.join('\n')}\n`);
       const zip = zipSync(files, { level: 0 }); // 3MF 本身已经压缩过
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
@@ -194,7 +204,7 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
     }
     render();
     const bad = todo.length - ok;
-    toast(ok ? `已下载 zip：${ok} 个相框${bad ? `，${bad} 个没生成` : ''}` : '一个都没生成成功，看看每张图下面的原因');
+    toast(ok ? `已下载 zip：${ok} 个相框${totalG() ? `，共约 ${fmtG(totalG())} g` : ''}${bad ? `，${bad} 个没生成` : ''}` : '一个都没生成成功，看看每张图下面的原因');
   }
 
   // ---------- 事件 ----------

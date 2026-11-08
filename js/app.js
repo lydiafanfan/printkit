@@ -1,13 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=26';
-import { TOOLS } from './tools.js?v=26';
-import { SAMPLES } from './samples.js?v=26';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=26';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=26';
-import { getFit, setFit } from './parts.js?v=26';
-import { export3MF } from './export3mf.js?v=26';
-import { makeBatch } from './batch.js?v=26';
+import { Viewer, Thumbnailer } from './viewer.js?v=27';
+import { TOOLS } from './tools.js?v=27';
+import { SAMPLES } from './samples.js?v=27';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=27';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=27';
+import { getFit, setFit } from './parts.js?v=27';
+import { export3MF } from './export3mf.js?v=27';
+import { makeBatch } from './batch.js?v=27';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=27';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -389,7 +390,7 @@ function groupsHTML(t, p) {
     return items.length ? sec('g-' + g.title, g.title, items.map(c => ctlHTML(c, p)).join('')) : '';
   }).join('');
 }
-const TIPS_SEC = () => sec('tips', '打印提示', '<ul class="tips" id="tips"></ul>');
+const TIPS_SEC = () => estSecHTML() + sec('tips', '打印提示', '<ul class="tips" id="tips"></ul>');
 const FOOT = `<div class="ins-foot"><span>双击滑块可恢复默认</span><button class="link-btn" id="resetTool">恢复默认参数</button></div>`;
 
 function renderPanel() {
@@ -435,6 +436,7 @@ function setValue(k, v, inImg) {
 
 $('#panel').addEventListener('input', e => {
   const t = e.target, k = t.dataset.k;
+  if (t.dataset.e) { estInput(t); return; }
   if (t.id === 'textIn') { S.text = t.value; LS.set('text', S.text); textChanged(); return; }
   if (t.dataset.level || t.dataset.levelNum) {
     const j = +(t.dataset.level ?? t.dataset.levelNum), v = parseFloat(t.value);
@@ -464,6 +466,7 @@ $('#panel').addEventListener('input', e => {
 });
 $('#panel').addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
+  if (t.dataset.e) { estInput(t); return; }
   if (t.tagName === 'SELECT' && t.dataset.act) { runAct(t.dataset.act, { key: t.dataset.arg, value: t.value }); return; }
   if (!k) return;
   const inImg = imgKeys.has(k) && !!t.closest('details.adv, [data-imgctl]');
@@ -501,6 +504,8 @@ $('#panel').addEventListener('click', async e => {
   if (b.dataset.tab) { S.tab = b.dataset.tab; if (S.tab === 'text') { textChanged(true); } renderPanel(); return; }
   if (b.dataset.sample) { await loadSample(b.dataset.sample); renderPanel(); rebuild(true); return; }
   if (b.id === 'pick') { $('#fileIn').click(); return; }
+  if (b.dataset.e) { estInput(b); return; }
+  if (b.id === 'estRec') { Object.assign(S.est, estRecommend().set); LS.set('est', S.est); refreshGroups(); toast('已换成推荐的填充和墙数'); return; }
   if (b.id === 'hmBatch') { batch.open(); if (!batch.count) batch.pick(); return; }
   if (b.id === 'hmSample') { S.hmArt = sampleHeightmap(); setP('levelH', []); setP('winBox', null); setP('winMode', 'auto'); renderPanel(); rebuild(true); return; }
   if (b.id === 'hmFlip') {
@@ -513,7 +518,69 @@ $('#panel').addEventListener('click', async e => {
   if (b.dataset.k && b.dataset.v !== undefined) { setP(b.dataset.k, b.dataset.v); refreshGroups(); rebuild(); return; }
   if (b.id === 'resetTool') { delete S.params[S.toolId]; LS.set('params', S.params); renderPanel(); rebuild(true); toast('已恢复默认参数'); }
 });
-function refreshGroups() { const y = $('#panel').scrollTop; renderPanel(); $('#panel').scrollTop = y; showTips(lastResult); }
+function refreshGroups() { const y = $('#panel').scrollTop; renderPanel(); $('#panel').scrollTop = y; showTips(lastResult); updateEst(); }
+
+// ---------- 耗材估算 ----------
+S.est = { ...EST_DEFAULT, ...LS.get('est', {}) };
+const STRONG = new Set(['buckle', 'storage', 'spoolrack', 'joiner']);
+function estRecommend() {
+  const id = S.toolId;
+  if (STRONG.has(id)) return { set: { infill: 20, pattern: 'gyroid', walls: 3 }, text: '要受力的零件：填充 20% 螺旋体、墙 3 层。想更结实，先加墙数，比加填充有效。' };
+  if (id === 'tolerance') return { set: { infill: 15, pattern: 'grid', walls: 2 }, text: '公差测试件要和以后打的零件用同一套设置，测出来的间隙才准。' };
+  return { set: { infill: 15, pattern: 'grid', walls: 2 }, text: '装饰类薄件：填充 15% 网格、墙 2 层就够，这也是 Bambu Studio 的默认值。' };
+}
+function estSecHTML() {
+  const e = S.est, pct = (e.infill / 100 * 100).toFixed(1);
+  return sec('est', '耗材估算', `
+    <div class="est-total"><b id="estG">—</b><span id="estSub">生成后自动计算</span></div>
+    <div class="est-rows" id="estRows"></div>
+    <div class="ctl"><div class="ctl-top"><span class="lbl">材料</span></div>
+      <div class="seg">${MATERIALS.map(([m]) => `<button data-e="mat" data-v="${m}" class="${e.mat === m ? 'on' : ''}">${m}</button>`).join('')}</div></div>
+    <div class="ctl"><div class="ctl-top"><span class="lbl">填充图案</span></div>
+      <div class="select"><select data-e="pattern">${PATTERNS.map(([v, lab]) => `<option value="${v}" ${e.pattern === v ? 'selected' : ''}>${lab}</option>`).join('')}</select></div></div>
+    <div class="ctl"><div class="ctl-top"><label for="r-est-infill">填充率</label>
+      <span class="num"><input type="number" data-e="infill" data-num value="${e.infill}" min="0" max="100" step="5" inputmode="decimal">%</span></div>
+      <input id="r-est-infill" class="slider" type="range" data-e="infill" min="0" max="100" step="5" value="${e.infill}" style="--p:${pct}%"></div>
+    <div class="ctl"><div class="ctl-top"><span class="lbl">墙层数<small>外壁一圈一圈的数量</small></span></div>
+      <div class="seg">${[1, 2, 3, 4].map(n => `<button data-e="walls" data-v="${n}" class="${+e.walls === n ? 'on' : ''}">${n} 层</button>`).join('')}</div></div>
+    <div class="est-tip" id="estTip"></div>`);
+}
+function estInput(t) {
+  const k = t.dataset.e;
+  let v = t.tagName === 'BUTTON' ? t.dataset.v : t.value;
+  if (k === 'infill') {
+    v = Math.min(100, Math.max(0, parseFloat(v)));
+    if (!isFinite(v)) return;
+    const ctl = t.closest('.ctl'), r = ctl.querySelector('input[type=range]'), n = ctl.querySelector('[data-num]');
+    if (t !== r) r.value = v; if (t !== n) n.value = v;
+    r.style.setProperty('--p', v + '%');
+  }
+  if (k === 'walls') v = +v;
+  S.est[k] = v; LS.set('est', S.est);
+  if (t.tagName === 'BUTTON') t.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === t));
+  updateEst();
+}
+let estTimer;
+function scheduleEst() { clearTimeout(estTimer); const g = $('#estG'); if (g && S.parts.length) $('#estSub').textContent = '计算中…'; estTimer = setTimeout(updateEst, 40); }
+function updateEst() {
+  const g = $('#estG');
+  if (!g) return;
+  if (!S.parts.length || !lastResult) { g.textContent = '—'; $('#estRows').innerHTML = ''; $('#estTip').innerHTML = ''; return; }
+  let r;
+  try { r = estimate(S.parts, S.est); } catch (err) { console.error(err); $('#estSub').textContent = '这个模型算不了'; return; }
+  const gs = v => v >= 100 ? Math.round(v) : (Math.round(v * 10) / 10).toFixed(1);
+  const m = r.g / r.rho * 1000 / (Math.PI * 0.875 * 0.875) / 1000; // 1.75mm 耗材长度（米）
+  g.textContent = `${gs(r.g)} g`;
+  $('#estSub').textContent = `约 ${m < 10 ? m.toFixed(1) : Math.round(m)} 米 ${S.est.mat} · 一卷 1kg 能打约 ${Math.max(1, Math.floor(1000 / r.g))} 个`;
+  $('#estRows').innerHTML = r.rows.length > 1 ? r.rows.map(x => `<div><span>${esc(x.label)}</span><b>${gs(x.g)} g</b></div>`).join('') : '';
+  const rec = estRecommend(), same = Object.entries(rec.set).every(([k, v]) => String(S.est[k]) === String(v));
+  const solidNote = r.shellFrac > 0.85
+    ? `这个模型 ${Math.round(r.shellFrac * 100)}% 都是外壁和顶底层（实心），填充改多少重量都差不多：每加 10% 只多约 ${gs(r.per10)} g。`
+    : `填充每加 10%，大约多 ${gs(r.per10)} g。`;
+  $('#estTip').innerHTML = `<p>${solidNote}</p><p><b>推荐</b>${rec.text}${same ? '' : ' <button class="chip" id="estRec">用推荐设置</button>'}</p>
+    <p><b>层高</b>0.2mm 标准就行；浮雕、小字多的可以用 0.12–0.16mm，更细腻，用料基本一样，只是打得更慢。</p>
+    <p class="dim">按 P1S「0.20mm 标准」的方式估算，和 Bambu Studio 切片结果对比过，一般差 10% 以内（闪电填充误差大一些）。多色换料的冲刷废料、支撑、裙边没算进去，以切片软件为准。</p>`;
+}
 function updateThumb() { const img = document.querySelector('.current .thumb img'); const u = artThumb(); if (img && u) img.src = u; }
 
 let textTimer;
@@ -616,6 +683,7 @@ function doBuild() {
       const fp = document.querySelector('[data-fitpick]'); if (fp) fp.innerHTML = fitPickHTML(p);
     }
     showTips(lastResult);
+    scheduleEst();
     hideError();
   } catch (err) {
     console.error(err);

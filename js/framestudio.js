@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=26';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg } from './heightmap.js?v=26';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=27';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg } from './heightmap.js?v=27';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
