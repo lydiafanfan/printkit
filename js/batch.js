@@ -3,9 +3,9 @@
  * 多张图用同一套参数，各做一个相框，打包成一个 zip。
  * 为了省内存，每张图只在分析 / 生成的时候读进来，用完就丢，只留缩略图。
  */
-import { artFromFile } from './engine.js?v=27';
-import { previewHM } from './heightmap.js?v=27';
-import { estimate } from './estimate.js?v=27';
+import { artFromFile } from './engine.js?v=29';
+import { previewHM } from './heightmap.js?v=29';
+import { estimate } from './estimate.js?v=29';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -37,7 +37,7 @@ export function makeBatch({ S, P, tool, toast, exportPack }) {
       it.levels = info.levels.length;
       it.bg = info.bg?.removed ? info.bg.bgName : '';
       if (it.mode === 'manual') it.box = boxOf(info.box);
-      it.thumb = previewHM(info.art, it.mode === 'manual' ? { ...info, win: null } : info, P().invert);
+      it.thumb = previewHM(info.viewArt || info.art, it.mode === 'manual' ? { ...info, win: null } : info, info.viewArt ? false : P().invert);
       it.state = it.mode === 'manual' || it.found ? 'ready' : 'need';
       it.art = keepArt ? art : null;
       it.info = keepArt ? info : null;

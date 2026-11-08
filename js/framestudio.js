@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=27';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg } from './heightmap.js?v=27';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=29';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels } from './heightmap.js?v=29';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -31,7 +31,7 @@ export const FRAME_STUDIO = {
   tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
   defaults: {
     bgAuto: true, winMode: 'auto', winBox: null, winShape: 'round', winR: 3,
-    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', flatH: 4, levelH: [], maxH: 6, minH: 3,
+    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', split: 'lum', flatH: 4, levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue',
     keyhole: true, keyPos: 'top', keyN: '2', magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
@@ -39,14 +39,15 @@ export const FRAME_STUDIO = {
   },
   groups: [
     { title: '高度', params: [
-      { k: 'hmode', label: '高度方式', hint: '分层：不同颜色 / 灰度做成不同高度；一样高：整个相框一个平面', type: 'seg', options: [['levels', '按颜色分层'], ['smooth', '按亮度渐变'], ['flat', '全部一样高']] },
+      { k: 'hmode', label: '高度方式', hint: '分层：图里每种颜色 / 深浅做成一种高度；一样高：整个相框一个平面', type: 'seg', options: [['levels', '分层'], ['smooth', '按亮度渐变'], ['flat', '全部一样高']] },
+      { k: 'split', label: '按什么分层', hint: '按颜色：粉色、蓝色这种深浅差不多的颜色也会分开；按深浅：只看灰度（白高黑空）', type: 'seg', options: [['color', '按颜色'], ['lum', '按深浅（灰度）']], show: p => p.hmode === 'levels' },
       { k: 'flatH', label: '相框高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'flat' },
       { k: 'levelH', type: 'levels', show: p => p.hmode === 'levels' },
       { k: 'maxH', label: '最亮处高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'minH', label: '最暗处高度', type: 'range', min: 0.6, max: 10, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'smooth', label: '平滑边缘', hint: '图片边缘毛躁、有锯齿时调大', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' },
-      { k: 'emptyT', label: '多暗算“空”', hint: '比这个更暗的地方不出实体', type: 'range', min: 0.02, max: 0.5, step: 0.01 },
-      { k: 'invert', label: '反过来（黑色最高）', type: 'toggle' },
+      { k: 'emptyT', label: '多暗算“空”', hint: '比这个更暗的地方不出实体', type: 'range', min: 0.02, max: 0.5, step: 0.01, show: p => !useColor(p) },
+      { k: 'invert', label: '反过来（黑色最高）', type: 'toggle', show: p => !useColor(p) },
       { k: 'rotate', label: '旋转图片', type: 'seg', options: [[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']] },
     ] },
     { title: '尺寸与照片', params: [
@@ -109,18 +110,29 @@ export const FRAME_STUDIO = {
     { k: 'winR', label: '窗口圆角', type: 'range', min: 0, max: 20, step: 0.5, unit: 'mm', show: p => p.winMode === 'manual' && p.winShape !== 'oval' },
   ],
 
-  info(art0, p) { // 给界面用：层级 + 窗口
+  info(art0, p0) { // 给界面用：层级 + 窗口
+    const p = effP(p0);
     const bgr = p.bgAuto ? prepBg(art0) : { art: art0, removed: false };
-    const art = rotateArt(bgr.art, +p.rotate);
+    let src = bgr.art, cl = null, viewArt = null;
+    if (useColor(p)) { // 按颜色：每类颜色换成一个灰度，预览还是显示原来的颜色
+      const colSrc = bgr.colorArt || art0;
+      cl = colorLevels(colSrc); src = cl.art; viewArt = rotateArt(colSrc, +p.rotate);
+    }
+    const art = rotateArt(src, +p.rotate);
     const hm = analyzeHM(art, p);
-    const res = { art, ...hm, autoWin: hm.win, bg: bgr };
+    const res = { art, viewArt, ...hm, autoWin: hm.win, bg: bgr, byColor: !!cl };
+    if (cl) {
+      const P = cl.palette;
+      res.levels = P.map((c, j) => ({ b: c.g, rgb: c.rgb, share: c.share, hi: j === 0 ? Infinity : (P[j - 1].g + c.g) / 2, lo: j === P.length - 1 ? p.emptyT : (c.g + P[j + 1].g) / 2 }));
+    }
     if (p.winMode === 'manual') { res.box = manualBox(art, hm, p); res.win = { x: res.box.x * art.w, y: res.box.y * art.h, w: res.box.w * art.w, h: res.box.h * art.h }; }
     return res;
   },
   manualBox: (art, hm, p) => manualBox(art, hm, p),
   photoRatio: p => photoRatio(p),
 
-  build(art0, _img, p) {
+  build(art0, _img, p0) {
+    const p = effP(p0);
     const info = FRAME_STUDIO.info(art0, p), art = info.art, hm = info;
     if (!hm.win) throw new Error('没找到中间的相片窗口。可以在上面“相框图”里把“相片窗口”改成“手动框选”，在图上拖一个框。');
     const manual = p.winMode === 'manual';
@@ -162,7 +174,7 @@ export const FRAME_STUDIO = {
     const sp = new Space(cx0 - 4, cy0 - 4 - (p.loop ? 2 * loopR : 0), cx1 + 4, cy1 + 4 + (p.stand ? p.tongueL + 2 : 0), 820);
 
     // ---- 主体（浮雕） ----
-    const b0 = rasterBright(sp, art, { x: -wcx * s, y: -wcy * s, w: art.w * s, h: art.h * s }, p.invert);
+    const b0 = rasterBright(sp, art, { x: -wcx * s, y: -wcy * s, w: art.w * s, h: art.h * s }, p.invert, info.byColor);
     const b = p.smooth > 0 ? blurField(sp, b0, p.smooth, false) : b0; // 平滑边缘：亮度图柔化后再分层
     if (manual) { // 手动窗口：直接从图里挖掉
       const wf = p.winShape === 'oval'
@@ -393,6 +405,11 @@ export const FRAME_STUDIO = {
 };
 
 /** 照片窗口的长短边比例（照片减去两边压边）；照片尺寸选“自动”时不限制 */
+/** 按颜色分层？（只在“分层”方式下） */
+function useColor(p) { return p.hmode === 'levels' && p.split === 'color'; }
+/** 按颜色时：只有透明 / 去掉的背景是空，“多暗算空”和“反过来”不起作用 */
+function effP(p) { return useColor(p) ? { ...p, invert: false, emptyT: 0.12 } : p; }
+
 function photoRatio(p) {
   let d = p.photo === 'custom' ? [p.pw, p.ph] : PHOTOS[p.photo];
   if (!d) return null;

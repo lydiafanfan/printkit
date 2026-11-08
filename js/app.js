@@ -1,14 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=27';
-import { TOOLS } from './tools.js?v=27';
-import { SAMPLES } from './samples.js?v=27';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=27';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=27';
-import { getFit, setFit } from './parts.js?v=27';
-import { export3MF } from './export3mf.js?v=27';
-import { makeBatch } from './batch.js?v=27';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=27';
+import { Viewer, Thumbnailer } from './viewer.js?v=29';
+import { TOOLS } from './tools.js?v=29';
+import { SAMPLES } from './samples.js?v=29';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=29';
+import { previewHM, levelName, colorName, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=29';
+import { getFit, setFit } from './parts.js?v=29';
+import { export3MF } from './export3mf.js?v=29';
+import { makeBatch } from './batch.js?v=29';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=29';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -305,12 +305,12 @@ function hmInfo(p) { try { return { info: tool().info(S.hmArt, p) }; } catch (e)
 function hmCardHTML(p) {
   const t = tool(), { info, err } = hmInfo(p);
   const manual = p.winMode === 'manual', box = manual && info?.box;
-  const prev = info ? previewHM(info.art, manual ? { ...info, win: null } : info, p.invert) : '';
+  const prev = info ? previewHM(info.viewArt || info.art, manual ? { ...info, win: null } : info, info.viewArt ? false : p.invert) : '';
   const handles = ['nw', 'ne', 'sw', 'se'].map(h => `<i data-h="${h}"></i>`).join('');
   const stage = prev ? `<div class="hm-stage"><img src="${prev}" alt="相框图预览" draggable="false">${box
     ? `<div class="win-box ${p.winShape === 'oval' ? 'oval' : ''}" style="left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%"><span>相片窗口</span>${handles}</div>` : ''}</div>` : '';
   const status = info
-    ? `${manual ? '<span class="ok">✓ 手动框选的窗口</span>' : info.win ? '<span class="ok">✓ 找到相片窗口</span>' : '<span class="bad">没找到相片窗口，可以改成“手动框选”</span>'}<span>识别到 ${info.levels.length} 种高度</span>${info.bg?.removed ? `<span>已去掉${info.bg.bgName}背景</span>` : ''}`
+    ? `${manual ? '<span class="ok">✓ 手动框选的窗口</span>' : info.win ? '<span class="ok">✓ 找到相片窗口</span>' : '<span class="bad">没找到相片窗口，可以改成“手动框选”</span>'}<span>识别到 ${info.levels.length} 种${info.byColor ? '颜色' : '高度'}</span>${info.bg?.removed ? `<span>已去掉${info.bg.bgName}背景</span>` : ''}`
     : `<span class="bad">${esc(err)}</span>`;
   const ctls = (t.cardParams || []).filter(c => !c.show || c.show(p)).map(c => ctlHTML(c, p)).join('');
   const manualTip = box ? `<div class="win-tip"><span>拖动框可以移动，拖四个角缩放。${t.photoRatio(p) ? '框的比例跟着“照片尺寸”走，换照片尺寸框会跟着变。' : ''}</span><button class="chip" id="hmFlip">横竖切换</button></div>` : '';
@@ -361,11 +361,20 @@ function levelsHTML(p) {
   const { info } = hmInfo(p);
   if (!info) return '';
   const H = Array.isArray(p.levelH) && p.levelH.length === info.levels.length ? p.levelH : defaultHeights(info.levels.length);
-  return `<div class="ctl"><div class="ctl-top"><span class="lbl">每层高度<small>图里识别到 ${info.levels.length} 种亮度，从高到低</small></span></div>
+  // 按颜色：同名的颜色按深浅加“浅 / 深”
+  const names = info.levels.map(l => l.rgb ? colorName(l.rgb) : levelName(l.b));
+  const label = names.map((nm, j) => {
+    const same = names.map((x, q) => x === nm ? q : -1).filter(q => q >= 0);
+    if (!info.byColor || same.length < 2) return nm;
+    const r = same.indexOf(j);
+    return same.length === 2 ? (r === 0 ? '浅' : '深') + nm : `${nm} ${r + 1}`;
+  });
+  return `<div class="ctl"><div class="ctl-top"><span class="lbl">每层高度<small>${info.byColor ? `图里识别到 ${info.levels.length} 种颜色，每种颜色一个高度` : `图里识别到 ${info.levels.length} 种亮度，从高到低`}</small></span></div>
     ${info.levels.map((l, j) => {
       const g = Math.round(l.b * 255), pct = ((H[j] - 0.4) / (20 - 0.4) * 100).toFixed(1);
-      return `<div class="lv"><span class="sw" style="background:rgb(${g},${g},${g})"></span><div class="lv-body">
-        <div class="lv-top"><span>${levelName(l.b)}<small>占 ${Math.max(1, Math.round(l.share * 100))}%</small></span>
+      const bg = l.rgb ? `rgb(${l.rgb.join(',')})` : `rgb(${g},${g},${g})`;
+      return `<div class="lv"><span class="sw" style="background:${bg}"></span><div class="lv-body">
+        <div class="lv-top"><span>${label[j]}<small>占 ${Math.max(1, Math.round(l.share * 100))}%</small></span>
         <span class="num"><input type="number" data-level-num="${j}" value="${H[j]}" min="0.4" max="30" step="0.2" inputmode="decimal">mm</span></div>
         <input type="range" class="slider" data-level="${j}" min="0.4" max="20" step="0.2" value="${H[j]}" style="--p:${pct}%"></div></div>`;
     }).join('')}</div>`;
@@ -604,6 +613,10 @@ async function useFile(file) {
     const art = await artFromFile(file);
     if (tool().kind === 'heightmap') {
       S.hmArt = art; setP('levelH', []); setP('winBox', null);
+      // 彩色图默认按颜色分层，灰度图按深浅
+      const colorful = isColorful(art), was = P().split;
+      setP('split', colorful ? 'color' : 'lum');
+      if (colorful && was !== 'color' && P().hmode === 'levels') setTimeout(() => toast('彩色图：已改成按颜色分层，可以在“高度”里换回按深浅'), 2800);
       // 自动找不到窗口时，直接切到手动框选
       const { info } = hmInfo({ ...P(), winMode: 'auto' });
       if (info && !info.win) { setP('winMode', 'manual'); setTimeout(() => toast('没自动找到相片窗口，已切换到手动框选：在图上拖动这个框'), 400); }

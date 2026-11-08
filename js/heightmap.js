@@ -3,7 +3,7 @@
  * 白色 = 最高，灰色 = 次高 …… 黑色 / 透明 = 空。
  * 图中间被实体包围的最大空区域 = 相片窗口。
  */
-import { Art } from './engine.js?v=27';
+import { Art } from './engine.js?v=29';
 
 // ---------- 旋转 ----------
 const rotCache = new WeakMap();
@@ -17,6 +17,7 @@ export function rotateArt(art, deg) {
   const c = document.createElement('canvas');
   c.width = swap ? art.h : art.w; c.height = swap ? art.w : art.h;
   const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = false; // 90° 的整数倍：像素一一对应，不要插值
   ctx.translate(c.width / 2, c.height / 2); ctx.rotate(deg * Math.PI / 180);
   ctx.drawImage(art.src, -art.w / 2, -art.h / 2, art.w, art.h);
   return (m[deg] = new Art(c, c.width, c.height, art.label));
@@ -66,8 +67,15 @@ export function prepBg(art) {
     return list;
   };
   for (const i of border) if (near[i] && !lab[i]) for (const j of flood(i, 1)) kill[j] = 1;
+  // 被围住的：最大的一块是相片窗口，直接去掉；其他大块只有颜色真的和背景一样（不是米色、浅粉这种）才去掉
   let id = 1;
-  for (let i = 0; i < n; i++) if (near[i] && !lab[i]) { const l = flood(i, ++id); if (l.length >= n * 0.01) for (const j of l) kill[j] = 1; }
+  const comps = [];
+  for (let i = 0; i < n; i++) if (near[i] && !lab[i]) { const l = flood(i, ++id); if (l.length >= n * 0.01) comps.push(l); }
+  comps.sort((p, q) => q.length - p.length);
+  comps.forEach((l, r) => {
+    let sum = 0; for (const j of l) sum += diff(j);
+    if (r === 0 || sum / l.length < 14) for (const j of l) kill[j] = 1;
+  });
   // 背景和图案之间的抗锯齿过渡色（偏向背景色的那一两圈）也去掉，免得外缘多出一圈别的高度
   for (let pass = 0; pass < 2; pass++) {
     const add = [];
@@ -78,7 +86,13 @@ export function prepBg(art) {
     }
     for (const i of add) kill[i] = 1;
   }
-  // 3) 输出：背景透明，其余转灰度 0.2–1
+  // 3) 输出：背景透明，其余转灰度 0.2–1（另外留一份保留颜色的，给“按颜色分层”用）
+  const cc = document.createElement('canvas'); cc.width = cw; cc.height = ch;
+  const cim = cc.getContext('2d').createImageData(cw, ch);
+  cim.data.set(d);
+  for (let i = 0; i < n; i++) if (kill[i]) cim.data[i * 4 + 3] = 0;
+  cc.getContext('2d').putImageData(cim, 0, 0);
+  res.colorArt = new Art(cc, art.w, art.h, art.label);
   for (let i = 0; i < n; i++) {
     if (kill[i]) { d[i * 4 + 3] = 0; continue; }
     const l = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255, g = Math.round((0.2 + 0.8 * l) * 255);
@@ -156,6 +170,138 @@ export function analyzeHM(art, { invert, emptyT }) {
   return res;
 }
 
+// ---------- 按颜色分层 ----------
+// 把图里的颜色归成几类（Lab 色彩空间里聚类，看起来像的颜色算一类），每一类换成一个固定的灰度，
+// 后面的分层、挖窗口、去细条都照旧用灰度做。灰度按颜色的明暗排，默认还是“亮的高”。
+const toLin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+const LIN = Float32Array.from({ length: 256 }, (_, i) => toLin(i));
+function lab(r, g, b) {
+  const R = LIN[r], G = LIN[g], B = LIN[b];
+  const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+  const x = f((0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.9505), y = f(0.2126 * R + 0.7152 * G + 0.0722 * B), z = f((0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.089);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+const d2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
+const MAX_COLORS = 8;
+
+/** 彩色图？（不透明部分里有 ≥12% 是明显有颜色的） */
+export function isColorful(art) {
+  const { cw, ch } = art.analysis();
+  const c = document.createElement('canvas'); c.width = Math.min(cw, 300); c.height = Math.max(1, Math.round(ch * c.width / cw));
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(art.src, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let op = 0, col = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) continue;
+    op++;
+    const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+    if (mx - mn > 50) col++;
+  }
+  return op > 0 && col / op >= 0.12;
+}
+
+const colCache = new WeakMap();
+/** 返回 { art: 每类颜色换成一个灰度的图, palette: [{ g, rgb, share }]（从亮到暗） } */
+export function colorLevels(art) {
+  if (colCache.has(art)) return colCache.get(art);
+  const sc = Math.min(1, 1600 / Math.max(art.w, art.h));
+  const cw = Math.max(1, Math.round(art.w * sc)), ch = Math.max(1, Math.round(art.h * sc));
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(art.src, 0, 0, cw, ch);
+  const im = ctx.getImageData(0, 0, cw, ch), d = im.data, n = cw * ch;
+  // 1) 按 5 位 / 通道分箱
+  const cnt = new Float64Array(32768), sr = new Float64Array(32768), sg = new Float64Array(32768), sb = new Float64Array(32768);
+  const key = new Int32Array(n);
+  let solid = 0;
+  for (let i = 0; i < n; i++) {
+    if (d[i * 4 + 3] < 128) { key[i] = -1; continue; }
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2], k = (r >> 3) << 10 | (g >> 3) << 5 | (b >> 3);
+    key[i] = k; cnt[k]++; sr[k] += r; sg[k] += g; sb[k] += b; solid++;
+  }
+  if (!solid) throw new Error('图里没找到不透明的部分。');
+  const bins = [];
+  for (let k = 0; k < 32768; k++) if (cnt[k]) { const rgb = [sr[k] / cnt[k], sg[k] / cnt[k], sb[k] / cnt[k]]; bins.push({ k, n: cnt[k], rgb, lab: lab(...rgb.map(Math.round)) }); }
+  bins.sort((p, q) => q.n - p.n);
+  // 2) 选种子：数量多、而且和已有种子颜色差得够远（ΔE > 20）
+  let cl = [];
+  for (const bn of bins) {
+    if (bn.n < solid * 0.003 || cl.length >= 12) break;
+    if (cl.every(c0 => d2(c0.lab, bn.lab) > 400)) cl.push({ lab: bn.lab.slice(), n: 0 });
+  }
+  if (!cl.length) cl = [{ lab: bins[0].lab.slice(), n: 0 }];
+  // 3) 加权 k-means
+  const assign = () => {
+    const acc = cl.map(() => ({ n: 0, l: 0, a: 0, b: 0, r: 0, g: 0, bb: 0 }));
+    for (const bn of bins) {
+      let best = 0, bd = Infinity;
+      for (let j = 0; j < cl.length; j++) { const v = d2(cl[j].lab, bn.lab); if (v < bd) { bd = v; best = j; } }
+      bn.c = best;
+      const A = acc[best]; A.n += bn.n; A.l += bn.lab[0] * bn.n; A.a += bn.lab[1] * bn.n; A.b += bn.lab[2] * bn.n; A.r += bn.rgb[0] * bn.n; A.g += bn.rgb[1] * bn.n; A.bb += bn.rgb[2] * bn.n;
+    }
+    cl = cl.map((c0, j) => { const A = acc[j]; return A.n ? { lab: [A.l / A.n, A.a / A.n, A.b / A.n], rgb: [A.r / A.n, A.g / A.n, A.bb / A.n], n: A.n } : { ...c0, n: 0 }; }).filter(c0 => c0.n > 0);
+  };
+  for (let it = 0; it < 8; it++) assign();
+  // 4) 太小的类（<1%）并进最像的；太多就把最像的两类合并
+  const mergeInto = (i, j) => {
+    const a = cl[i], b = cl[j], N = a.n + b.n;
+    cl[j] = { n: N, lab: a.lab.map((v, q) => (v * a.n + b.lab[q] * b.n) / N), rgb: a.rgb.map((v, q) => (v * a.n + b.rgb[q] * b.n) / N) };
+    cl.splice(i, 1);
+  };
+  for (;;) {
+    if (cl.length <= 1) break;
+    let small = -1;
+    for (let j = 0; j < cl.length; j++) if (cl[j].n < solid * 0.01 && (small < 0 || cl[j].n < cl[small].n)) small = j;
+    if (small >= 0) {
+      let best = -1, bd = Infinity;
+      for (let j = 0; j < cl.length; j++) if (j !== small) { const v = d2(cl[j].lab, cl[small].lab); if (v < bd) { bd = v; best = j; } }
+      mergeInto(small, best); continue;
+    }
+    if (cl.length <= MAX_COLORS) break;
+    let pi = 0, pj = 1, pd = Infinity;
+    for (let i = 0; i < cl.length; i++) for (let j = i + 1; j < cl.length; j++) { const v = d2(cl[i].lab, cl[j].lab); if (v < pd) { pd = v; pi = i; pj = j; } }
+    mergeInto(pi, pj);
+  }
+  assign();
+  // 5) 从亮到暗排，每类一个灰度
+  const order = cl.map((c0, j) => j).sort((p, q) => cl[q].lab[0] - cl[p].lab[0]);
+  const K = cl.length, stepG = K > 1 ? Math.min(0.14, 0.7 / (K - 1)) : 0;
+  const greyOf = new Float32Array(K);
+  order.forEach((j, r) => { greyOf[j] = 1 - r * stepG; });
+  const binC = new Int16Array(32768).fill(-1);
+  for (const bn of bins) binC[bn.k] = bn.c;
+  for (let i = 0; i < n; i++) {
+    if (key[i] < 0) { d[i * 4 + 3] = 0; continue; }
+    const v = Math.round(greyOf[binC[key[i]]] * 255);
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(im, 0, 0);
+  const palette = order.map(j => ({ g: greyOf[j], rgb: cl[j].rgb.map(Math.round), share: cl[j].n / solid }));
+  const res = { art: new Art(c, art.w, art.h, art.label), palette };
+  colCache.set(art, res);
+  return res;
+}
+
+/** 颜色的中文名字 */
+export function colorName([r, g, b]) {
+  const mx = Math.max(r, g, b) / 255, mn = Math.min(r, g, b) / 255, l = (mx + mn) / 2, dd = mx - mn;
+  const sat = dd === 0 ? 0 : dd / (1 - Math.abs(2 * l - 1));
+  if (l < 0.16 || (sat < 0.2 && l < 0.3)) return '黑色';
+  if (sat < 0.15) return l > 0.85 ? '白色' : '灰色';
+  if (l > 0.93) return '白色';
+  let h = mx === mn ? 0 : mx * 255 === r ? ((g - b) / 255 / dd) % 6 : mx * 255 === g ? (b - r) / 255 / dd + 2 : (r - g) / 255 / dd + 4;
+  h = (h * 60 + 360) % 360;
+  if ((h < 45 || h >= 345) && l < 0.38 && h > 10) return '棕色';
+  if (h < 12 || h >= 345) return l > 0.72 ? '粉色' : '红色';
+  if (h < 42) return l < 0.42 ? '棕色' : '橙色';
+  if (h < 68) return l > 0.85 ? '米色' : '黄色';
+  if (h < 160) return '绿色';
+  if (h < 195) return '青色';
+  if (h < 255) return '蓝色';
+  if (h < 290) return '紫色';
+  return '粉色';
+}
+
 export function levelName(b) { return b > 0.9 ? '白色' : b > 0.7 ? '浅灰' : b > 0.45 ? '灰色' : b > 0.25 ? '深灰' : '暗灰'; }
 export function defaultHeights(n) {
   if (n === 1) return [5];
@@ -163,8 +309,9 @@ export function defaultHeights(n) {
 }
 
 // ---------- 光栅化到毫米网格 ----------
-export function rasterBright(sp, art, rect, invert) {
+export function rasterBright(sp, art, rect, invert, nearest) {
   const { ctx } = sp.canvas();
+  ctx.imageSmoothingEnabled = !nearest; // 按颜色分层：每类颜色是一个固定灰度，不能插值出中间值
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(art.src, rect.x, rect.y, rect.w, rect.h);
   const d = ctx.getImageData(0, 0, sp.w, sp.h).data;
