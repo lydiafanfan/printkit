@@ -3,7 +3,7 @@
  * 白色 = 最高，灰色 = 次高 …… 黑色 / 透明 = 空。
  * 图中间被实体包围的最大空区域 = 相片窗口。
  */
-import { Art } from './engine.js?v=23';
+import { Art } from './engine.js?v=24';
 
 // ---------- 旋转 ----------
 const rotCache = new WeakMap();
@@ -20,6 +20,65 @@ export function rotateArt(art, deg) {
   ctx.translate(c.width / 2, c.height / 2); ctx.rotate(deg * Math.PI / 180);
   ctx.drawImage(art.src, -art.w / 2, -art.h / 2, art.w, art.h);
   return (m[deg] = new Art(c, c.width, c.height, art.label));
+}
+
+// ---------- 去掉纯色背景 ----------
+// 彩色插画常常是白底 / 浅色底：按“白色最高”的规则，背景会变成一整块实心。
+// 检测到图片四周是一种浅色（不透明）时：和边缘连通的背景色 + 被围住的大块背景色（= 相片窗口）变透明，
+// 其余部分转成灰度并抬到 0.2 以上，保证线稿里的黑色也是实心。
+const bgCache = new WeakMap();
+export function prepBg(art) {
+  if (bgCache.has(art)) return bgCache.get(art);
+  const res = { art, removed: false };
+  bgCache.set(art, res);
+  const sc = Math.min(1, 1600 / Math.max(art.w, art.h));
+  const cw = Math.max(1, Math.round(art.w * sc)), ch = Math.max(1, Math.round(art.h * sc));
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(art.src, 0, 0, cw, ch);
+  const im = ctx.getImageData(0, 0, cw, ch), d = im.data, n = cw * ch;
+  // 1) 边缘颜色
+  const border = [];
+  for (let x = 0; x < cw; x++) border.push(x, (ch - 1) * cw + x);
+  for (let y = 1; y < ch - 1; y++) border.push(y * cw, y * cw + cw - 1);
+  const opaque = border.filter(i => d[i * 4 + 3] > 200);
+  if (opaque.length < border.length * 0.6) return res;          // 边缘大多透明：本来就没背景
+  const med = k => { const v = opaque.map(i => d[i * 4 + k]).sort((a, b) => a - b); return v[v.length >> 1]; };
+  const bg = [med(0), med(1), med(2)];
+  const bgLum = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) / 255;
+  if (bgLum < 0.3) return res;                                    // 深色背景：按原规则本来就是“空”
+  const diff = i => Math.max(Math.abs(d[i * 4] - bg[0]), Math.abs(d[i * 4 + 1] - bg[1]), Math.abs(d[i * 4 + 2] - bg[2]));
+  const near = new Uint8Array(n);
+  for (let i = 0; i < n; i++) near[i] = d[i * 4 + 3] > 128 && diff(i) < 48 ? 1 : 0;
+  if (opaque.filter(i => near[i]).length < opaque.length * 0.7) return res;   // 边缘颜色不统一：不是纯色背景
+  // 2) 连通块：和边缘连通的全部去掉；被围住的大块（≥ 1%）也去掉（相片窗口）
+  const lab = new Int32Array(n), stack = new Int32Array(n), kill = new Uint8Array(n);
+  const flood = (st, id) => {
+    let top = 0; const list = [];
+    stack[top++] = st; lab[st] = id;
+    while (top) {
+      const i = stack[--top], x = i % cw; list.push(i);
+      if (x > 0 && near[i - 1] && !lab[i - 1]) { lab[i - 1] = id; stack[top++] = i - 1; }
+      if (x < cw - 1 && near[i + 1] && !lab[i + 1]) { lab[i + 1] = id; stack[top++] = i + 1; }
+      if (i >= cw && near[i - cw] && !lab[i - cw]) { lab[i - cw] = id; stack[top++] = i - cw; }
+      if (i < n - cw && near[i + cw] && !lab[i + cw]) { lab[i + cw] = id; stack[top++] = i + cw; }
+    }
+    return list;
+  };
+  for (const i of border) if (near[i] && !lab[i]) for (const j of flood(i, 1)) kill[j] = 1;
+  let id = 1;
+  for (let i = 0; i < n; i++) if (near[i] && !lab[i]) { const l = flood(i, ++id); if (l.length >= n * 0.01) for (const j of l) kill[j] = 1; }
+  // 3) 输出：背景透明，其余转灰度 0.2–1
+  for (let i = 0; i < n; i++) {
+    if (kill[i]) { d[i * 4 + 3] = 0; continue; }
+    const l = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255, g = Math.round((0.2 + 0.8 * l) * 255);
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = g;
+  }
+  ctx.putImageData(im, 0, 0);
+  res.art = new Art(c, art.w, art.h, art.label);
+  res.removed = true;
+  res.bgName = bgLum > 0.92 && Math.max(...bg) - Math.min(...bg) < 20 ? '白色' : '纯色';
+  return res;
 }
 
 // ---------- 分析：亮度层级 + 相片窗口 ----------

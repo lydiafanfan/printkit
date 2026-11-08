@@ -1,12 +1,12 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=23';
-import { TOOLS } from './tools.js?v=23';
-import { SAMPLES } from './samples.js?v=23';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=23';
-import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=23';
-import { getFit, setFit } from './parts.js?v=23';
-import { export3MF } from './export3mf.js?v=23';
+import { Viewer, Thumbnailer } from './viewer.js?v=24';
+import { TOOLS } from './tools.js?v=24';
+import { SAMPLES } from './samples.js?v=24';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=24';
+import { previewHM, levelName, defaultHeights, sampleHeightmap } from './heightmap.js?v=24';
+import { getFit, setFit } from './parts.js?v=24';
+import { export3MF } from './export3mf.js?v=24';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -301,19 +301,55 @@ function fitPickHTML(p) {
 // ---------- 相框工作室专用 ----------
 function hmInfo(p) { try { return { info: tool().info(S.hmArt, p) }; } catch (e) { return { err: e.message }; } }
 function hmCardHTML(p) {
-  const { info, err } = hmInfo(p);
-  const prev = info ? previewHM(info.art, info, p.invert) : '';
+  const t = tool(), { info, err } = hmInfo(p);
+  const manual = p.winMode === 'manual', box = manual && info?.box;
+  const prev = info ? previewHM(info.art, manual ? { ...info, win: null } : info, p.invert) : '';
+  const handles = ['nw', 'ne', 'sw', 'se'].map(h => `<i data-h="${h}"></i>`).join('');
+  const stage = prev ? `<div class="hm-stage"><img src="${prev}" alt="相框图预览" draggable="false">${box
+    ? `<div class="win-box ${p.winShape === 'oval' ? 'oval' : ''}" style="left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%"><span>相片窗口</span>${handles}</div>` : ''}</div>` : '';
   const status = info
-    ? `${info.win ? '<span class="ok">✓ 找到相片窗口</span>' : '<span class="bad">没找到相片窗口</span>'}<span>识别到 ${info.levels.length} 种高度</span>`
+    ? `${manual ? '<span class="ok">✓ 手动框选的窗口</span>' : info.win ? '<span class="ok">✓ 找到相片窗口</span>' : '<span class="bad">没找到相片窗口，可以改成“手动框选”</span>'}<span>识别到 ${info.levels.length} 种高度</span>${info.bg?.removed ? `<span>已去掉${info.bg.bgName}背景</span>` : ''}`
     : `<span class="bad">${esc(err)}</span>`;
+  const ctls = (t.cardParams || []).filter(c => !c.show || c.show(p)).map(c => ctlHTML(c, p)).join('');
+  const manualTip = box ? `<div class="win-tip"><span>拖动框可以移动，拖四个角缩放。${t.photoRatio(p) ? '框的比例跟着“照片尺寸”走，换照片尺寸框会跟着变。' : ''}</span><button class="chip" id="hmFlip">横竖切换</button></div>` : '';
   return sec('hm', '相框图', `
-    <div class="hm-preview">${prev ? `<img src="${prev}" alt="相框图预览">` : ''}</div>
+    <div class="hm-preview">${stage}</div>
     <div class="hm-meta"><b>${esc(S.hmArt?.label || '')}</b>${status}</div>
+    ${manualTip}${ctls}
     <button class="dropzone small" id="pick">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-      上传高度图<small>白色最高、灰色次高、黑色或透明为空</small></button>
+      上传相框图<small>白色最高、灰色次高、黑色或透明为空；白底彩色图也可以</small></button>
     <button class="link-btn" id="hmSample">换回示例图</button>`);
 }
+// 手动框选：拖动 / 缩放窗口框
+$('#panel').addEventListener('pointerdown', e => {
+  const boxEl = e.target.closest('.win-box');
+  if (!boxEl) return;
+  e.preventDefault();
+  const stage = boxEl.parentElement, R = stage.getBoundingClientRect(), h = e.target.dataset.h || null;
+  const st = { x: e.clientX, y: e.clientY, l: boxEl.offsetLeft, t: boxEl.offsetTop, w: boxEl.offsetWidth, h: boxEl.offsetHeight };
+  const ratio = st.h / st.w, lock = !!tool().photoRatio(P()), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+  const cur = { ...st };
+  boxEl.setPointerCapture(e.pointerId);
+  boxEl.classList.add('drag');
+  const move = ev => {
+    if (!h) { cur.l = cl(st.l + ev.clientX - st.x, 0, R.width - st.w); cur.t = cl(st.t + ev.clientY - st.y, 0, R.height - st.h); }
+    else {
+      const fx = h.includes('w') ? st.l + st.w : st.l, fy = h.includes('n') ? st.t + st.h : st.t;
+      const px = cl(ev.clientX - R.left, 0, R.width), py = cl(ev.clientY - R.top, 0, R.height);
+      let w = Math.max(16, Math.abs(px - fx)), hh = Math.max(16, Math.abs(py - fy));
+      if (lock) { const z = Math.max(w, hh / ratio); w = z; hh = z * ratio; }
+      cur.w = w; cur.h = hh; cur.l = h.includes('w') ? fx - w : fx; cur.t = h.includes('n') ? fy - hh : fy;
+    }
+    Object.assign(boxEl.style, { left: cur.l / R.width * 100 + '%', top: cur.t / R.height * 100 + '%', width: cur.w / R.width * 100 + '%', height: cur.h / R.height * 100 + '%' });
+  };
+  const up = () => {
+    boxEl.removeEventListener('pointermove', move); boxEl.removeEventListener('pointerup', up); boxEl.removeEventListener('pointercancel', up);
+    setP('winBox', { cx: (cur.l + cur.w / 2) / R.width, cy: (cur.t + cur.h / 2) / R.height, w: cur.w / R.width, h: cur.h / R.height });
+    refreshGroups(); rebuild();
+  };
+  boxEl.addEventListener('pointermove', move); boxEl.addEventListener('pointerup', up); boxEl.addEventListener('pointercancel', up);
+});
 function levelsHTML(p) {
   const { info } = hmInfo(p);
   if (!info) return '';
@@ -459,7 +495,12 @@ $('#panel').addEventListener('click', async e => {
   if (b.dataset.tab) { S.tab = b.dataset.tab; if (S.tab === 'text') { textChanged(true); } renderPanel(); return; }
   if (b.dataset.sample) { await loadSample(b.dataset.sample); renderPanel(); rebuild(true); return; }
   if (b.id === 'pick') { $('#fileIn').click(); return; }
-  if (b.id === 'hmSample') { S.hmArt = sampleHeightmap(); setP('levelH', []); renderPanel(); rebuild(true); return; }
+  if (b.id === 'hmSample') { S.hmArt = sampleHeightmap(); setP('levelH', []); setP('winBox', null); setP('winMode', 'auto'); renderPanel(); rebuild(true); return; }
+  if (b.id === 'hmFlip') {
+    const { info } = hmInfo(P());
+    if (info?.box) { const { box, art } = info; setP('winBox', { cx: box.cx, cy: box.cy, w: box.h * art.h / art.w, h: box.w * art.w / art.h }); refreshGroups(); rebuild(); }
+    return;
+  }
   if (b.dataset.font) { S.font = +b.dataset.font; LS.set('font', S.font); textChanged(true); renderPanel(); return; }
   if (b.hasAttribute('data-bold')) { S.bold = !S.bold; LS.set('bold', S.bold); textChanged(true); renderPanel(); return; }
   if (b.dataset.k && b.dataset.v !== undefined) { setP(b.dataset.k, b.dataset.v); refreshGroups(); rebuild(); return; }
@@ -487,7 +528,13 @@ async function useFile(file) {
   if (!file) return;
   try {
     const art = await artFromFile(file);
-    if (tool().kind === 'heightmap') { S.hmArt = art; setP('levelH', []); }
+    if (tool().kind === 'heightmap') {
+      S.hmArt = art; setP('levelH', []); setP('winBox', null);
+      // 自动找不到窗口时，直接切到手动框选
+      const { info } = hmInfo({ ...P(), winMode: 'auto' });
+      if (info && !info.win) { setP('winMode', 'manual'); setTimeout(() => toast('没自动找到相片窗口，已切换到手动框选：在图上拖动这个框'), 400); }
+      else setP('winMode', 'auto');
+    }
     else { S.art = art; S.source = 'file'; S.tab = 'upload'; }
     renderPanel(); rebuild(true);
     toast('已载入：' + file.name);

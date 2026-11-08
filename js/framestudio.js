@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=23';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights } from './heightmap.js?v=23';
+import { Space, F, erode, edgeAlong, buildSolid, blurField } from './engine.js?v=24';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg } from './heightmap.js?v=24';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -30,6 +30,7 @@ export const FRAME_STUDIO = {
   id: 'framestudio', name: '相框工作室', kind: 'heightmap',
   tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
   defaults: {
+    bgAuto: true, winMode: 'auto', winBox: null, winShape: 'round', winR: 3,
     rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue',
@@ -99,15 +100,29 @@ export const FRAME_STUDIO = {
     ] },
   ],
 
+  // 显示在“相框图”卡片里的参数
+  cardParams: [
+    { k: 'bgAuto', label: '自动去掉纯色背景', hint: '白底 / 浅色底的彩色图：背景和中间的大块底色当成空', type: 'toggle' },
+    { k: 'winMode', label: '相片窗口', type: 'seg', options: [['auto', '自动识别'], ['manual', '手动框选']] },
+    { k: 'winShape', label: '窗口形状', type: 'seg', options: [['round', '圆角方形'], ['oval', '椭圆']], show: p => p.winMode === 'manual' },
+    { k: 'winR', label: '窗口圆角', type: 'range', min: 0, max: 20, step: 0.5, unit: 'mm', show: p => p.winMode === 'manual' && p.winShape !== 'oval' },
+  ],
+
   info(art0, p) { // 给界面用：层级 + 窗口
-    const art = rotateArt(art0, +p.rotate);
-    return { art, ...analyzeHM(art, p) };
+    const bgr = p.bgAuto ? prepBg(art0) : { art: art0, removed: false };
+    const art = rotateArt(bgr.art, +p.rotate);
+    const hm = analyzeHM(art, p);
+    const res = { art, ...hm, autoWin: hm.win, bg: bgr };
+    if (p.winMode === 'manual') { res.box = manualBox(art, hm, p); res.win = { x: res.box.x * art.w, y: res.box.y * art.h, w: res.box.w * art.w, h: res.box.h * art.h }; }
+    return res;
   },
+  manualBox: (art, hm, p) => manualBox(art, hm, p),
+  photoRatio: p => photoRatio(p),
 
   build(art0, _img, p) {
-    const art = rotateArt(art0, +p.rotate);
-    const hm = analyzeHM(art, p);
-    if (!hm.win) throw new Error('没找到中间的相片窗口。请确认图中间留了一块黑色或透明的区域，并且四周被相框完整围住。');
+    const info = FRAME_STUDIO.info(art0, p), art = info.art, hm = info;
+    if (!hm.win) throw new Error('没找到中间的相片窗口。可以在上面“相框图”里把“相片窗口”改成“手动框选”，在图上拖一个框。');
+    const manual = p.winMode === 'manual';
     const warnings = [], notes = [];
 
     // ---- 层高 ----
@@ -147,6 +162,12 @@ export const FRAME_STUDIO = {
     // ---- 主体（浮雕） ----
     const b0 = rasterBright(sp, art, { x: -wcx * s, y: -wcy * s, w: art.w * s, h: art.h * s }, p.invert);
     const b = p.smooth > 0 ? blurField(sp, b0, p.smooth, false) : b0; // 平滑边缘：亮度图柔化后再分层
+    if (manual) { // 手动窗口：直接从图里挖掉
+      const wf = p.winShape === 'oval'
+        ? sp.draw(g => { g.beginPath(); g.ellipse(0, 0, winW / 2, winH / 2, 0, 0, 7); g.fill(); })
+        : sp.rect(-winW / 2, -winH / 2, winW, winH, Math.min(p.winR, winW / 2, winH / 2));
+      for (let i = 0; i < b.length; i++) b[i] *= 1 - wf[i];
+    }
     const body = bandField(b, p.emptyT, Infinity);
     const hpx = new Float32Array(b.length);
     for (let i = 0; i < b.length; i++) hpx[i] = hOf(b[i]);
@@ -342,6 +363,33 @@ export const FRAME_STUDIO = {
     return { parts, notes, warnings, colorChange: null, magnets: magSpots, keyholes: keySpots };
   },
 };
+
+/** 照片窗口的长短边比例（照片减去两边压边）；照片尺寸选“自动”时不限制 */
+function photoRatio(p) {
+  let d = p.photo === 'custom' ? [p.pw, p.ph] : PHOTOS[p.photo];
+  if (!d) return null;
+  const a = Math.max(d[0], d[1]) - 2 * p.lip, b = Math.min(d[0], d[1]) - 2 * p.lip;
+  return b > 1 ? a / b : null;
+}
+
+/** 手动框选的窗口（相对图片 0–1 的坐标）。比例跟着照片尺寸走，方向（横 / 竖）跟着框走。 */
+function manualBox(art, hm, p) {
+  let { cx, cy, w, h } = p.winBox || {};
+  if (!(w > 0 && h > 0)) {
+    const r = hm.win || (() => { const c = hm.content, ww = c.w * 0.45, hh = c.h * 0.45; return { x: c.x + (c.w - ww) / 2, y: c.y + (c.h - hh) / 2, w: ww, h: hh }; })();
+    cx = (r.x + r.w / 2) / art.w; cy = (r.y + r.h / 2) / art.h; w = r.w / art.w; h = r.h / art.h;
+  }
+  let bw = w * art.w, bh = h * art.h;
+  const R = photoRatio(p);
+  if (R) {
+    const area = bw * bh, sh = Math.sqrt(area / R), lg = sh * R;
+    [bw, bh] = bh >= bw ? [sh, lg] : [lg, sh];
+  }
+  const k = Math.min(1, art.w * 0.98 / bw, art.h * 0.98 / bh); bw *= k; bh *= k;
+  const nw = bw / art.w, nh = bh / art.h;
+  cx = Math.min(1 - nw / 2, Math.max(nw / 2, cx)); cy = Math.min(1 - nh / 2, Math.max(nh / 2, cy));
+  return { x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh, cx, cy };
+}
 
 /** 定位销位置：夹层外壁四个角（相框坐标） */
 function pinSpots(P, wall) {
