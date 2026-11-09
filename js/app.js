@@ -1,14 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=31';
-import { TOOLS } from './tools.js?v=31';
-import { SAMPLES } from './samples.js?v=31';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=31';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=31';
-import { getFit, setFit } from './parts.js?v=31';
-import { export3MF } from './export3mf.js?v=31';
-import { makeBatch } from './batch.js?v=31';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=31';
+import { Viewer, Thumbnailer } from './viewer.js?v=32';
+import { TOOLS } from './tools.js?v=32';
+import { SAMPLES } from './samples.js?v=32';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=32';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=32';
+import { getFit, setFit } from './parts.js?v=32';
+import { export3MF } from './export3mf.js?v=32';
+import { makeBatch } from './batch.js?v=32';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=32';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -322,7 +322,7 @@ function hmCardHTML(p) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
       上传相框图<small>白色最高、灰色次高、黑色或透明为空；白底彩色图也可以</small></button>
     <button class="bt-open" id="hmBatch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg>
-      <span>批量生成<small>一次放多张图，用现在的参数各做一个，打包下载</small></span>${batch?.count ? `<em>${batch.count} 张</em>` : ''}</button>
+      <span>批量生成<small>${batch?.dirName ? `文件夹「${batch.dirName}」${batch.watching ? '：新照片自动生成' : ''}` : '一次放多张图，或者选一个文件夹自动生成'}</small></span>${batch?.watching ? '<em class="live">自动生成中</em>' : batch?.count ? `<em>${batch.count} 张</em>` : ''}</button>
     <button class="link-btn" id="hmSample">换回示例图</button>`);
 }
 // 手动框选：拖动 / 缩放窗口框
@@ -645,6 +645,12 @@ addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => {
   e.preventDefault(); dragDepth = 0; $('#dropVeil').classList.remove('on');
   const files = [...(e.dataTransfer?.files || [])];
+  // 相框工作室里拖进来一个文件夹：直接用文件夹模式（Chrome / Edge）
+  const it0 = e.dataTransfer?.items?.[0];
+  if (!$('#studio').hidden && tool().kind === 'heightmap' && files.length === 1 && !files[0].type && it0?.getAsFileSystemHandle) {
+    it0.getAsFileSystemHandle().then(h => h?.kind === 'directory' ? batch.useDir(h) : useFile(files[0]), () => useFile(files[0]));
+    return;
+  }
   if (!$('#studio').hidden && tool().kind === 'mesh') runAct('files', files);
   else if ($('#batch').open || (!$('#studio').hidden && tool().kind === 'heightmap' && files.length > 1)) batch.open(files);
   else useFile(files[0]);
@@ -744,7 +750,12 @@ function exportPack(res, fmt = S.fmt) {
   if (parts !== res.parts) parts.forEach(pt => pt.geo.dispose());
   return { data, ext: fmt };
 }
-const batch = makeBatch({ S, P, tool, toast, exportPack });
+// 批量只给相框工作室用；自动生成时你可能已经切到别的工具，所以固定用相框工作室和它的参数
+const FS_ID = 'framestudio', fsTool = () => TOOLS.find(t => t.id === FS_ID);
+const batch = makeBatch({
+  S, toast, exportPack, tool: fsTool, P: () => ({ ...fsTool().defaults, ...(S.params[FS_ID] || {}) }),
+  onState: () => { if (!$('#studio').hidden && tool().kind === 'heightmap' && !$('#batch').open) refreshGroups(); },
+});
 $('#batch').addEventListener('close', () => { if (!$('#studio').hidden && tool().kind === 'heightmap') refreshGroups(); });
 $('#download').addEventListener('click', () => {
   if (!S.parts.length) return;

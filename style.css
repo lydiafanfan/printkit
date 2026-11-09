@@ -459,6 +459,21 @@ details.adv[open] { padding-bottom: 2px; }
 .bt-bar i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
 .bt-edit { display: grid; place-items: center; background: var(--sunken); margin: 0 22px 16px; border-radius: var(--r); padding: 14px; min-height: 240px; overflow: hidden; }
 .bt-edit img { max-width: 100%; max-height: min(58vh, 560px); border-radius: 6px; }
+.bt-dir { display: flex; align-items: center; gap: 10px; margin: 0 22px 10px; padding: 10px 12px; border-radius: var(--r); background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(255, 95, 61, .18); font-size: 12.5px; }
+.bt-dir.off { background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); }
+.bt-dir > svg { width: 22px; height: 22px; flex: none; color: var(--accent); }
+.bt-dir > div { flex: 1; min-width: 0; }
+.bt-dir b { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-dir small { display: block; color: var(--ink2); font-size: 11.5px; margin-top: 1px; }
+.bt-live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.bt-live::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.bt-live.on { color: var(--ok); font-weight: 600; }
+.bt-live.on::before { background: var(--ok); animation: btpulse 1.6s ease-in-out infinite; }
+@keyframes btpulse { 50% { opacity: .35; } }
+.bt-note { margin: -4px 22px 10px; color: var(--ink2); font-size: 12px; }
+.bt-hint { cursor: default; text-align: center; }
+.bt-hint svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 4px; }
+.bt-open em.live { background: var(--ok); }
 .bt-spin { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); animation: btspin .8s linear infinite; }
 @keyframes btspin { to { transform: rotate(360deg); } }
 @media (max-width: 560px) {
@@ -466,6 +481,8 @@ details.adv[open] { padding-bottom: 2px; }
   .bt-head, .bt-foot { padding-left: 16px; padding-right: 16px; }
   .bt-foot { flex-wrap: wrap; }
   .bt-edit { margin: 0 16px 12px; }
+  .bt-dir { margin: 0 16px 10px; flex-wrap: wrap; }
+  .bt-note { margin: -4px 16px 10px; }
 }
 
 /* ---------- 耗材估算 ---------- */
