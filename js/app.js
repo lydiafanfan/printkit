@@ -1,14 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=29';
-import { TOOLS } from './tools.js?v=29';
-import { SAMPLES } from './samples.js?v=29';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=29';
-import { previewHM, levelName, colorName, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=29';
-import { getFit, setFit } from './parts.js?v=29';
-import { export3MF } from './export3mf.js?v=29';
-import { makeBatch } from './batch.js?v=29';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=29';
+import { Viewer, Thumbnailer } from './viewer.js?v=31';
+import { TOOLS } from './tools.js?v=31';
+import { SAMPLES } from './samples.js?v=31';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=31';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=31';
+import { getFit, setFit } from './parts.js?v=31';
+import { export3MF } from './export3mf.js?v=31';
+import { makeBatch } from './batch.js?v=31';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=31';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -361,14 +361,7 @@ function levelsHTML(p) {
   const { info } = hmInfo(p);
   if (!info) return '';
   const H = Array.isArray(p.levelH) && p.levelH.length === info.levels.length ? p.levelH : defaultHeights(info.levels.length);
-  // 按颜色：同名的颜色按深浅加“浅 / 深”
-  const names = info.levels.map(l => l.rgb ? colorName(l.rgb) : levelName(l.b));
-  const label = names.map((nm, j) => {
-    const same = names.map((x, q) => x === nm ? q : -1).filter(q => q >= 0);
-    if (!info.byColor || same.length < 2) return nm;
-    const r = same.indexOf(j);
-    return same.length === 2 ? (r === 0 ? '浅' : '深') + nm : `${nm} ${r + 1}`;
-  });
+  const label = levelLabels(info.levels, info.byColor);
   return `<div class="ctl"><div class="ctl-top"><span class="lbl">每层高度<small>${info.byColor ? `图里识别到 ${info.levels.length} 种颜色，每种颜色一个高度` : `图里识别到 ${info.levels.length} 种亮度，从高到低`}</small></span></div>
     ${info.levels.map((l, j) => {
       const g = Math.round(l.b * 255), pct = ((H[j] - 0.4) / (20 - 0.4) * 100).toFixed(1);

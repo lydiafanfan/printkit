@@ -3,7 +3,7 @@
  * 白色 = 最高，灰色 = 次高 …… 黑色 / 透明 = 空。
  * 图中间被实体包围的最大空区域 = 相片窗口。
  */
-import { Art } from './engine.js?v=29';
+import { Art } from './engine.js?v=31';
 
 // ---------- 旋转 ----------
 const rotCache = new WeakMap();
@@ -302,6 +302,16 @@ export function colorName([r, g, b]) {
   return '粉色';
 }
 
+/** 每层的名字：按颜色时同名的加“浅 / 深”或编号 */
+export function levelLabels(levels, byColor) {
+  const names = levels.map(l => l.rgb ? colorName(l.rgb) : levelName(l.b));
+  return names.map((nm, j) => {
+    const same = names.map((x, q) => x === nm ? q : -1).filter(q => q >= 0);
+    if (!byColor || same.length < 2) return nm;
+    const r = same.indexOf(j);
+    return same.length === 2 ? (r === 0 ? '浅' : '深') + nm : `${nm} ${r + 1}`;
+  });
+}
 export function levelName(b) { return b > 0.9 ? '白色' : b > 0.7 ? '浅灰' : b > 0.45 ? '灰色' : b > 0.25 ? '深灰' : '暗灰'; }
 export function defaultHeights(n) {
   if (n === 1) return [5];

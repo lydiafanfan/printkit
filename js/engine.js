@@ -437,7 +437,7 @@ export function layoutParts(parts, gap = 8) {
     const b = p.geo.boundingBox;
     if (p !== parts[0] && !p.keepPlace) p.geo.translate(x - b.min.x, -(b.min.y + b.max.y) / 2, 0);
     p.geo.computeBoundingBox();
-    x = p.geo.boundingBox.max.x + gap;
+    x = Math.max(x, p.geo.boundingBox.max.x + gap); // 叠在一起的零件（keepPlace）可能比前一个窄
   }
   const box = new THREE.Box3();
   parts.forEach(p => box.union(p.geo.boundingBox));

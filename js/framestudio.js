@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=29';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels } from './heightmap.js?v=29';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=31';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=31';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -31,7 +31,7 @@ export const FRAME_STUDIO = {
   tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
   defaults: {
     bgAuto: true, winMode: 'auto', winBox: null, winShape: 'round', winR: 3,
-    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', split: 'lum', flatH: 4, levelH: [], maxH: 6, minH: 3,
+    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', split: 'lum', ams: 'on', amsBase: 1.2, flatH: 4, levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue',
     keyhole: true, keyPos: 'top', keyN: '2', magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
@@ -43,6 +43,8 @@ export const FRAME_STUDIO = {
       { k: 'split', label: '按什么分层', hint: '按颜色：粉色、蓝色这种深浅差不多的颜色也会分开；按深浅：只看灰度（白高黑空）', type: 'seg', options: [['color', '按颜色'], ['lum', '按深浅（灰度）']], show: p => p.hmode === 'levels' },
       { k: 'flatH', label: '相框高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'flat' },
       { k: 'levelH', type: 'levels', show: p => p.hmode === 'levels' },
+      { k: 'ams', label: 'AMS 多色', hint: '每种颜色导出成一个零件，打开 3MF 时已经按颜色分好 1、2、3… 号耗材', type: 'seg', options: [['on', '每种颜色一个零件'], ['off', '一个零件（单色）']], show: p => useColor(p) },
+      { k: 'amsBase', label: '底层统一颜色', hint: '底下这么厚全用面积最大的那种颜色，往上才分色，换料次数少很多；0 = 每种颜色从底到顶都是自己的颜色', type: 'range', min: 0, max: 5, step: 0.2, unit: 'mm', show: p => useColor(p) && p.ams === 'on' },
       { k: 'maxH', label: '最亮处高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'minH', label: '最暗处高度', type: 'range', min: 0.6, max: 10, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'smooth', label: '平滑边缘', hint: '图片边缘毛躁、有锯齿时调大', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' },
@@ -369,9 +371,14 @@ export const FRAME_STUDIO = {
       extra.push({ f: sp.rect(-p.tongueW / 2, by - 6, p.tongueW, 6 + p.tongueL, 1), z0: 0, z1: p.tongueT });
     }
 
-    const frameGeo = buildSolid(sp, [...feats, ...extra, ...back.map(f => ({ ...f, op: 'sub' }))]);
-    if (!frameGeo) throw new Error('没有生成出形状，检查一下高度设置');
-    const parts = [{ geo: frameGeo, label: '相框' }];
+    const subs = back.map(f => ({ ...f, op: 'sub' }));
+    const multi = useColor(p) && p.ams !== 'off' && p.hmode === 'levels' && feats.length > 1;
+    const parts = multi ? colorParts(sp, body, feats, bands, hm.levels, extra, subs, p, notes, warnings) : [];
+    if (!parts.length) {
+      const frameGeo = buildSolid(sp, [...feats, ...extra, ...subs]);
+      if (!frameGeo) throw new Error('没有生成出形状，检查一下高度设置');
+      parts.push({ geo: frameGeo, label: '相框' });
+    }
 
     // ---- 夹层零件 ----
     if (hasHolder) parts.push(...holderParts(p, P, {
@@ -403,6 +410,67 @@ export const FRAME_STUDIO = {
     return { parts, notes, warnings, colorChange: null, magnets: magSpots, keyholes: keySpots };
   },
 };
+
+/**
+ * AMS 多色：相框按颜色拆成几个零件（同一个物体里叠在一起），每个零件带颜色和耗材号。
+ * 每个像素归到 f 最大的那一层，交界处稍微柔化后归一化，相邻零件的边界完全重合、不留缝。
+ * 底下 zb 毫米统一用面积最大的颜色（底色），往上每种颜色各自到自己的高度。
+ */
+function colorParts(sp, body, feats, bands, levels, extra, subs, p, notes, warnings) {
+  const n = body.length, K = feats.length, W = sp.w;
+  if (!levels || levels.length !== K || !levels[0].rgb) return [];
+  let kb = 0;
+  levels.forEach((l, k) => { if (l.share > levels[kb].share) kb = k; });
+  // 归属：f 最大的那一层
+  const lab = new Int8Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    if (body[i] <= 0) continue;
+    let best = kb, bv = 0;
+    for (let k = 0; k < K; k++) if (feats[k].f[i] > bv) { bv = feats[k].f[i]; best = k; }
+    lab[i] = best;
+  }
+  // 3×3 柔化 + 归一化：两种颜色交界处 g_a + g_b = body，0.5 等值线是同一条
+  const g = Array.from({ length: K }, () => new Float32Array(n));
+  for (let i = 0; i < n; i++) {
+    if (body[i] <= 0) continue;
+    const x = i % W;
+    let tot = 0;
+    for (let dy = -W; dy <= W; dy += W) for (let dx = -1; dx <= 1; dx++) {
+      if ((dx < 0 && x === 0) || (dx > 0 && x === W - 1)) continue;
+      const j = i + dy + dx;
+      if (j < 0 || j >= n || lab[j] < 0) continue;
+      g[lab[j]][i] += 1; tot++;
+    }
+    for (let k = 0; k < K; k++) g[k][i] = tot ? body[i] * g[k][i] / tot : (k === kb ? body[i] : 0);
+  }
+  const hmin = Math.min(...bands.map(b => b.h));
+  const zb = Math.max(0, Math.min(+p.amsBase || 0, hmin - 0.6));
+  const names = levelLabels(levels, true);
+  const hex = rgb => '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+  // 挂绳环、插片跟相框主体重叠的部分去掉，避免和别的颜色零件重叠
+  const ext = extra.map(e => ({ ...e, f: F.sub(e.f, body) }));
+  const order = [kb, ...levels.map((_, k) => k).filter(k => k !== kb).sort((a, b) => levels[b].share - levels[a].share)];
+  const parts = [];
+  for (const k of order) {
+    const fts = k === kb
+      ? [...(zb > 0 ? [{ f: body, z0: 0, z1: zb }] : []), { f: g[k], z0: 0, z1: bands[k].h }, ...ext]
+      : [{ f: g[k], z0: zb, z1: bands[k].h }];
+    const geo = buildSolid(sp, [...fts, ...subs]);
+    if (!geo) continue;
+    parts.push({ geo, label: names[k] + (k === kb && zb > 0 ? '（底色）' : ''), color: hex(levels[k].rgb), keepPlace: true, ams: parts.length + 1, _h: bands[k].h });
+  }
+  if (parts.length < 2) return [];
+  // 换料次数：每一层里有几种颜色，就要换（颜色数 − 1）次
+  const lh = 0.2, hmax = Math.max(...bands.map(b => b.h));
+  let swaps = 0;
+  for (let z = zb + lh / 2; z < hmax; z += lh) swaps += Math.max(0, parts.filter(pt => pt._h > z).length - 1);
+  parts.forEach(pt => delete pt._h);
+  notes.push(`AMS 多色：相框按颜色拆成 ${parts.length} 个零件，打开 3MF 后在一个物体里，已经分好耗材：${parts.map(pt => `${pt.ams} 号 ${pt.label}`).join('、')}。在 Bambu Studio 左上角的耗材列表里把这几个耗材设成对应的颜色（不够就点 + 加）。`);
+  notes.push(zb > 0 ? `底下 ${r1(zb)}mm 统一是${names[kb]}，往上才分色；大约换料 ${swaps} 次，每次冲掉约 0.2–0.5g，冲刷废料大约 ${Math.round(swaps * 0.2)}–${Math.round(swaps * 0.5)}g（耗材估算里没算这部分）。`
+    : `每种颜色从底到顶都是自己的颜色；大约换料 ${swaps} 次，每次冲掉约 0.2–0.5g，冲刷废料大约 ${Math.round(swaps * 0.2)}–${Math.round(swaps * 0.5)}g（耗材估算里没算这部分）。把“底层统一颜色”调大可以少换几次。`);
+  if (parts.length > 4) warnings.push(`有 ${parts.length} 种颜色，一台 AMS 只有 4 个槽。可以在 Bambu Studio 里把相近的颜色设成同一个耗材（零件右边的耗材号改成一样的），或者再加一台 AMS。`);
+  return parts;
+}
 
 /** 照片窗口的长短边比例（照片减去两边压边）；照片尺寸选“自动”时不限制 */
 /** 按颜色分层？（只在“分层”方式下） */

@@ -8,6 +8,8 @@
  *  3. 每层里离边缘 < 墙厚的格子是墙（实心），剩下的按填充率算。
  * 1~4 层墙的结果一次算好，换填充、墙数、材料时不用重算。
  */
+import * as THREE from 'three';
+
 export const MATERIALS = [['PLA', 1.26], ['PETG', 1.28], ['ABS', 1.05], ['ASA', 1.05], ['TPU', 1.22]]; // Bambu 耗材预设里的密度
 export const PATTERNS = [ // 第三个数：同样填充率时实际用料和网格的比（Bambu Studio 切片对比得出）
   ['grid', '网格', 1], ['gyroid', '螺旋体', 0.9], ['cubic', '立方体', 0.93], ['crosshatch', '交叉', 0.94],
@@ -151,12 +153,31 @@ export function estimate(parts, s = EST_DEFAULT) {
   const pf = (PATTERNS.find(p => p[0] === s.pattern) || PATTERNS[0])[2];
   const d = Math.min(1, Math.max(0, s.infill / 100) * pf), n = Math.min(MAXW, Math.max(1, s.walls | 0));
   let V = 0, shellV = 0;
+  // 叠在一起的零件（多色）：互相贴着的那一面在切片里不是顶面 / 底面，顶底层按合起来的整体算
+  const grp = parts.filter(pt => pt.keepPlace), skinF = grp.length > 1 ? groupSkinFactor(grp.map(pt => pt.geo)) : 1;
   const rows = parts.map(pt => {
-    const m = meshStats(pt.geo), shell = Math.min(m.V, m.skin + m.wall[n]), inner = m.V - shell;
+    const m0 = meshStats(pt.geo), sk = m0.skin * (pt.keepPlace ? skinF : 1), m = { ...m0, skin: sk };
+    const shell = Math.min(m.V, m.skin + m.wall[n]), inner = m.V - shell;
     V += m.V; shellV += shell;
     const vol = m.skin * K_SKIN + m.wall[n] * K_WALL + inner * Math.min(1, d * K_SPARSE);
     return { label: pt.label || '零件', V: m.V, shell, inner, g: vol * rho / 1000 };
   });
   const g = rows.reduce((a, r) => a + r.g, 0);
   return { rows, g, V, shellFrac: V ? shellV / V : 1, per10: (V - shellV) * 0.1 * pf * K_SPARSE * rho / 1000, rho };
+}
+
+/** 多个零件合起来的顶底层体积 / 各自算的顶底层体积之和 */
+const grpCache = new WeakMap();
+function groupSkinFactor(geos) {
+  const hit = grpCache.get(geos[0]);
+  if (hit && hit.geos.length === geos.length && hit.geos.every((g, i) => g === geos[i])) return hit.f;
+  const arrs = geos.map(g => (g.index ? g.toNonIndexed() : g).attributes.position.array);
+  const all = new Float32Array(arrs.reduce((a, x) => a + x.length, 0));
+  let o = 0; for (const a of arrs) { all.set(a, o); o += a.length; }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(all, 3));
+  const sum = geos.reduce((a, g) => a + meshStats(g).skin, 0);
+  const f = sum > 0 ? Math.min(1, meshStats(merged).skin / sum) : 1;
+  grpCache.set(geos[0], { geos, f });
+  return f;
 }

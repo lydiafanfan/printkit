@@ -3,6 +3,8 @@
  * - 每个零件是一个独立的网格对象，带名字和颜色；
  * - 需要叠在一起打印的零件（双色钥匙扣、仿欧根纱）合成一个“组合对象”，
  *   导入 Bambu Studio 后是一个物体里的多个零件，可以分别选 AMS 耗材；
+ * - 零件带 ams（耗材号 1、2、3…）时，另外写一个 Bambu 的 Metadata/model_settings.config，
+ *   打开时每个零件已经指定好耗材；
  * - 其他零件（手柄、夹层、底座）是各自独立的物体；
  * - 整体放在 P1S 打印板中心 (128, 128)。
  */
@@ -43,12 +45,20 @@ export function export3MF(parts, colors, center = [128, 128]) {
   });
   const T = `transform="1 0 0 0 1 0 0 0 1 ${center[0]} ${center[1]} 0"`;
   const group = parts.map((p, i) => (p.keepPlace ? i : -1)).filter(i => i >= 0);
+  let settings = null;
   if (group.length > 1) {
     const oid = id++;
+    if (group.some(i => parts[i].ams)) {
+      const md = (k, v) => `<metadata key="${k}" value="${esc(v)}"/>`;
+      settings = `<?xml version="1.0" encoding="UTF-8"?>
+<config><object id="${oid}">${md('name', parts[group[0]].label)}${md('extruder', parts[group[0]].ams || 1)}${group.map(i => `<part id="${meshIds[i]}" subtype="normal_part">${md('name', parts[i].label || '零件')}${md('extruder', parts[i].ams || 1)}</part>`).join('')}</object></config>`;
+    }
     objects.push(`<object id="${oid}" type="model" name="${esc(parts[group[0]].label)}+${group.length - 1}"><components>${group.map(i => `<component objectid="${meshIds[i]}"/>`).join('')}</components></object>`);
     items.push(`<item objectid="${oid}" ${T}/>`);
   }
   parts.forEach((p, i) => { if (!(group.length > 1 && p.keepPlace)) items.push(`<item objectid="${meshIds[i]}" ${T}/>`); });
+  // 其他零件（夹层、底座）也写上耗材号：默认 1 号（底色），否则 Bambu 会给它们一个不存在的耗材号
+  if (settings) settings = settings.replace('</config>', parts.map((p, i) => group.includes(i) ? '' : `<object id="${meshIds[i]}"><metadata key="name" value="${esc(p.label || '零件')}"/><metadata key="extruder" value="${p.ams || 1}"/><part id="${meshIds[i]}" subtype="normal_part"><metadata key="name" value="${esc(p.label || '零件')}"/><metadata key="extruder" value="${p.ams || 1}"/></part></object>`).join('') + '</config>');
 
   const model = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="zh-CN" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
@@ -63,5 +73,6 @@ export function export3MF(parts, colors, center = [128, 128]) {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`),
     '3D/3dmodel.model': strToU8(model),
   };
+  if (settings) files['Metadata/model_settings.config'] = strToU8(settings);
   return zipSync(files, { level: 6 });
 }

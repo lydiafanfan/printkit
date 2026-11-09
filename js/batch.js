@@ -3,9 +3,9 @@
  * 多张图用同一套参数，各做一个相框，打包成一个 zip。
  * 为了省内存，每张图只在分析 / 生成的时候读进来，用完就丢，只留缩略图。
  */
-import { artFromFile } from './engine.js?v=29';
-import { previewHM } from './heightmap.js?v=29';
-import { estimate } from './estimate.js?v=29';
+import { artFromFile } from './engine.js?v=31';
+import { previewHM } from './heightmap.js?v=31';
+import { estimate } from './estimate.js?v=31';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
