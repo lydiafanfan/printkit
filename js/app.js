@@ -1,14 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=32';
-import { TOOLS } from './tools.js?v=32';
-import { SAMPLES } from './samples.js?v=32';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=32';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=32';
-import { getFit, setFit } from './parts.js?v=32';
-import { export3MF } from './export3mf.js?v=32';
-import { makeBatch } from './batch.js?v=32';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=32';
+import { Viewer, Thumbnailer } from './viewer.js?v=33';
+import { TOOLS } from './tools.js?v=33';
+import { SAMPLES } from './samples.js?v=33';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=33';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=33';
+import { getFit, setFit } from './parts.js?v=33';
+import { export3MF } from './export3mf.js?v=33';
+import { makeBatch } from './batch.js?v=33';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=33';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -246,23 +246,26 @@ function route() {
 addEventListener('hashchange', route);
 
 // ---------- 左侧面板 ----------
-function artThumb() {
-  if (!S.art) return '';
+function artThumb() { return S.art ? inkThumb(S.art, 96).url : ''; }
+/** 按现在的阈值 / 反相把图变成黑白小图；ink = 有没有深色部分 */
+function inkThumb(art, size = 150) {
   try {
-    const { cw, ch, lum, alpha } = S.art.analysis();
-    const k = Math.min(1, 96 / Math.max(cw, ch));
+    const { cw, ch, lum, alpha } = art.analysis();
+    const k = Math.min(1, size / Math.max(cw, ch));
     const w = Math.max(1, Math.round(cw * k)), h = Math.max(1, Math.round(ch * k));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const ctx = c.getContext('2d'), out = ctx.createImageData(w, h);
+    let ink = false;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = Math.floor(y / k) * cw + Math.floor(x / k);
       const v = S.img.invert ? alpha[i] * lum[i] : alpha[i] * (1 - lum[i]);
       const on = v > S.img.threshold, o = (y * w + x) * 4;
       out.data[o] = 40; out.data[o + 1] = 36; out.data[o + 2] = 32; out.data[o + 3] = on ? 255 : 0;
+      if (on) ink = true;
     }
     ctx.putImageData(out, 0, 0);
-    return c.toDataURL();
-  } catch { return ''; }
+    return { url: c.toDataURL(), ink };
+  } catch { return { url: '', ink: false }; }
 }
 
 function ctlHTML(c, p) {
@@ -302,6 +305,20 @@ function fitPickHTML(p) {
 
 // ---------- 相框工作室专用 ----------
 function hmInfo(p) { try { return { info: tool().info(S.hmArt, p) }; } catch (e) { return { err: e.message }; } }
+/** 批量生成入口（相框工作室和所有上传图片的工具） */
+function batchBtnHTML() {
+  let batch = null;
+  try { batch = batchRef(); } catch { } // 页面刚打开时批量模块可能还没建好
+  const mine = batch?.toolId === S.toolId, dir = batch?.dirName;
+  const sub = dir ? (mine ? `文件夹「${dir}」${batch.watching ? '：新图片自动生成' : ''}` : `文件夹「${dir}」现在给「${batch.toolName}」用${batch.watching ? '（自动生成中）' : ''}`)
+    : '一次放多张图，或者选一个文件夹自动生成';
+  const badge = batch?.watching && mine ? '<em class="live">自动生成中</em>' : mine && batch?.count ? `<em>${batch.count} 张</em>` : '';
+  return `<button class="bt-open" id="hmBatch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg>
+      <span>批量生成<small>${sub}</small></span>${badge}</button>`;
+}
+const batchRef = () => batch;
+const batchable = t => t && (t.kind === 'heightmap' || !t.kind);
+
 function hmCardHTML(p) {
   const t = tool(), { info, err } = hmInfo(p);
   const manual = p.winMode === 'manual', box = manual && info?.box;
@@ -321,8 +338,7 @@ function hmCardHTML(p) {
     <button class="dropzone small" id="pick">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
       上传相框图<small>白色最高、灰色次高、黑色或透明为空；白底彩色图也可以</small></button>
-    <button class="bt-open" id="hmBatch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg>
-      <span>批量生成<small>${batch?.dirName ? `文件夹「${batch.dirName}」${batch.watching ? '：新照片自动生成' : ''}` : '一次放多张图，或者选一个文件夹自动生成'}</small></span>${batch?.watching ? '<em class="live">自动生成中</em>' : batch?.count ? `<em>${batch.count} 张</em>` : ''}</button>
+    ${batchBtnHTML()}
     <button class="link-btn" id="hmSample">换回示例图</button>`);
 }
 // 手动框选：拖动 / 缩放窗口框
@@ -420,6 +436,7 @@ function renderPanel() {
     ${S.tab === 'text' ? `<textarea class="textarea" id="textIn" rows="2" placeholder="输入文字，可以换行">${esc(S.text)}</textarea>
       <div class="fonts">${FONTS.map(([f, n], i) => `<button class="chip ${i === S.font ? 'on' : ''}" data-font="${i}" style="font-family:${esc(f)}">${n}</button>`).join('')}
       <button class="chip ${S.bold ? 'on' : ''}" data-bold style="font-weight:700">粗体</button></div>` : ''}
+    ${S.tab === 'upload' ? batchBtnHTML() : ''}
     ${S.art ? `<div class="current"><div class="thumb">${thumb ? `<img src="${thumb}" alt="">` : ''}</div><div class="meta"><b>${esc(S.art.label)}</b><span>${sourceLabel} · 深色部分变成实体</span></div></div>` : ''}
     <div data-imgctl>${ctlHTML({ k: 'smooth', label: '平滑边缘', hint: '边缘毛躁、有锯齿时调大；太大会让细线变细', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' }, S.img)}</div>
     <details class="adv" ${LS.get('advOpen', false) ? 'open' : ''}>
@@ -508,7 +525,7 @@ $('#panel').addEventListener('click', async e => {
   if (b.id === 'pick') { $('#fileIn').click(); return; }
   if (b.dataset.e) { estInput(b); return; }
   if (b.id === 'estRec') { Object.assign(S.est, estRecommend().set); LS.set('est', S.est); refreshGroups(); toast('已换成推荐的填充和墙数'); return; }
-  if (b.id === 'hmBatch') { batch.open(); if (!batch.count) batch.pick(); return; }
+  if (b.id === 'hmBatch') { batch.pick(S.toolId); return; }
   if (b.id === 'hmSample') { S.hmArt = sampleHeightmap(); setP('levelH', []); setP('winBox', null); setP('winMode', 'auto'); renderPanel(); rebuild(true); return; }
   if (b.id === 'hmFlip') {
     const { info } = hmInfo(P());
@@ -647,12 +664,13 @@ addEventListener('drop', e => {
   const files = [...(e.dataTransfer?.files || [])];
   // 相框工作室里拖进来一个文件夹：直接用文件夹模式（Chrome / Edge）
   const it0 = e.dataTransfer?.items?.[0];
-  if (!$('#studio').hidden && tool().kind === 'heightmap' && files.length === 1 && !files[0].type && it0?.getAsFileSystemHandle) {
-    it0.getAsFileSystemHandle().then(h => h?.kind === 'directory' ? batch.useDir(h) : useFile(files[0]), () => useFile(files[0]));
+  if (!$('#studio').hidden && batchable(tool()) && files.length === 1 && !files[0].type && it0?.getAsFileSystemHandle) {
+    it0.getAsFileSystemHandle().then(h => h?.kind === 'directory' ? batch.useDir(h, S.toolId) : useFile(files[0]), () => useFile(files[0]));
     return;
   }
   if (!$('#studio').hidden && tool().kind === 'mesh') runAct('files', files);
-  else if ($('#batch').open || (!$('#studio').hidden && tool().kind === 'heightmap' && files.length > 1)) batch.open(files);
+  else if ($('#batch').open) batch.open(files);
+  else if (!$('#studio').hidden && batchable(tool()) && files.length > 1) batch.open(files, S.toolId);
   else useFile(files[0]);
 });
 
@@ -750,13 +768,14 @@ function exportPack(res, fmt = S.fmt) {
   if (parts !== res.parts) parts.forEach(pt => pt.geo.dispose());
   return { data, ext: fmt };
 }
-// 批量只给相框工作室用；自动生成时你可能已经切到别的工具，所以固定用相框工作室和它的参数
-const FS_ID = 'framestudio', fsTool = () => TOOLS.find(t => t.id === FS_ID);
+// 批量：一次给一个工具用；自动生成时你切到别的工具，用的还是那个工具和它的参数
+const getTool = id => TOOLS.find(t => t.id === id);
 const batch = makeBatch({
-  S, toast, exportPack, tool: fsTool, P: () => ({ ...fsTool().defaults, ...(S.params[FS_ID] || {}) }),
-  onState: () => { if (!$('#studio').hidden && tool().kind === 'heightmap' && !$('#batch').open) refreshGroups(); },
+  S, toast, exportPack, getTool, getP: id => ({ ...getTool(id).defaults, ...(S.params[id] || {}) }),
+  thumbOf: art => inkThumb(art, 150),
+  onState: () => { if (!$('#studio').hidden && batchable(tool()) && !$('#batch').open) renderPanel(); },
 });
-$('#batch').addEventListener('close', () => { if (!$('#studio').hidden && tool().kind === 'heightmap') refreshGroups(); });
+$('#batch').addEventListener('close', () => { if (!$('#studio').hidden && tool().kind === 'heightmap') refreshGroups(); else if (!$('#studio').hidden && batchable(tool())) renderPanel(); });
 $('#download').addEventListener('click', () => {
   if (!S.parts.length) return;
   const d = new Date();
