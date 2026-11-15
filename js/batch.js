@@ -9,9 +9,9 @@
  * 打开“自动生成”后，网页开着时每隔几秒看一次文件夹，没生成过的照片自动生成；
  * 已经生成过的不会自己重新生成（除非照片换了新的），要用新参数重做就点“全部重新生成”。
  */
-import { artFromFile } from './engine.js?v=33';
-import { previewHM } from './heightmap.js?v=33';
-import { estimate } from './estimate.js?v=33';
+import { artFromFile } from './engine.js?v=34';
+import { previewHM } from './heightmap.js?v=34';
+import { estimate } from './estimate.js?v=34';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -286,7 +286,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
   /** 现在的参数，写进生成记录 */
   function paramsText() {
     const t = tool(), p = P(), lines = [];
-    if (!isHM()) { const m = S.img; lines.push(`  图像调整：阈值 ${m.threshold}，线条加粗 ${m.thicken}mm，反相 ${m.invert ? '开' : '关'}，平滑边缘 ${m.smooth}mm`); }
+    if (!isHM()) { const m = S.img; lines.push(`  图像调整：阈值 ${m.threshold}，线条加粗 ${m.thicken}mm，反相 ${m.invert ? '开' : '关'}，平滑边缘 ${m.smooth}mm，补小缝隙 ${m.gap ?? 0}mm`); }
     const fmtV = (c, v) => c.options ? (c.options.find(o => String(o[0]) === String(v))?.[1] ?? v)
       : c.type === 'toggle' ? (v ? '开' : '关') : `${v}${c.unit || ''}`;
     for (const g of t.groups) {

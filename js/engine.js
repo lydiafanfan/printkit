@@ -107,6 +107,13 @@ export function erode(sp, f, rmm) {
   const inv = f.map(v => 1 - v);
   return dilate(sp, inv, rmm).map(v => 1 - v);
 }
+/** 补小缝隙（闭运算）：先外扩 r 再内缩 r，窄于 2r 的缝、断口被补上，线条粗细不变 */
+export function closeGaps(sp, f, rmm) {
+  if (!(rmm > 0)) return f;
+  const c = erode(sp, dilate(sp, f, rmm), rmm);
+  for (let i = 0; i < c.length; i++) if (f[i] > c[i]) c[i] = f[i];
+  return c;
+}
 /** 把封闭线条围起来的区域填实 */
 export function fillHoles(sp, f) {
   const { w, h } = sp;
@@ -224,7 +231,8 @@ export function rasterArt(sp, art, rect, img, mirror = false) {
     const t = 0.5 + (v - img.threshold) * 3;
     f[i] = t < 0 ? 0 : t > 1 ? 1 : t;
   }
-  const g = img.smooth > 0 ? blurField(sp, f, img.smooth) : f; // 平滑边缘：先柔化再描边，磨掉毛刺和锯齿
+  const fc = img.gap > 0 ? closeGaps(sp, f, img.gap / 2) : f; // 补小缝隙：线条没接上的小断口、小缝补上
+  const g = img.smooth > 0 ? blurField(sp, fc, img.smooth) : fc; // 平滑边缘：先柔化再描边，磨掉毛刺和锯齿
   return img.thicken > 0 ? dilate(sp, g, img.thicken / 2) : g;
 }
 

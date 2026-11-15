@@ -6,8 +6,8 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=33';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=33';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=34';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=34';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -31,7 +31,7 @@ export const FRAME_STUDIO = {
   tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
   defaults: {
     bgAuto: true, winMode: 'auto', winBox: null, winShape: 'round', winR: 3,
-    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, hmode: 'levels', split: 'lum', ams: 'on', amsBase: 1.2, flatH: 4, levelH: [], maxH: 6, minH: 3,
+    rotate: 0, invert: false, emptyT: 0.12, smooth: 0, gap: 0.6, hmode: 'levels', split: 'lum', ams: 'on', amsBase: 1.2, flatH: 4, levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue',
     keyhole: true, keyPos: 'top', keyN: '2', magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
@@ -48,6 +48,7 @@ export const FRAME_STUDIO = {
       { k: 'maxH', label: '最亮处高度', type: 'range', min: 1, max: 20, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'minH', label: '最暗处高度', type: 'range', min: 0.6, max: 10, step: 0.2, unit: 'mm', show: p => p.hmode === 'smooth' },
       { k: 'smooth', label: '平滑边缘', hint: '图片边缘毛躁、有锯齿时调大', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' },
+      { k: 'gap', label: '补小缝隙', hint: '线条没接上、有小缝或小断口时调大：比这个窄的缝都会补上（补的地方跟旁边的颜色 / 高度一样）；0 = 不补', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' },
       { k: 'emptyT', label: '多暗算“空”', hint: '比这个更暗的地方不出实体', type: 'range', min: 0.02, max: 0.5, step: 0.01, show: p => !useColor(p) },
       { k: 'invert', label: '反过来（黑色最高）', type: 'toggle', show: p => !useColor(p) },
       { k: 'rotate', label: '旋转图片', type: 'seg', options: [[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']] },
@@ -212,6 +213,29 @@ export const FRAME_STUDIO = {
         for (const j of [x > 0 ? i - 1 : -1, x < sp.w - 1 ? i + 1 : -1, i - sp.w, i + sp.w]) {
           if (j < 0 || j >= n || lab[j] >= 0 || body[j] < 0.5) continue;
           lab[j] = lab[i]; feats[lab[i]].f[j] = Math.max(feats[lab[i]].f[j], body[j]); q[qt++] = j;
+        }
+      }
+    }
+
+    // 补小缝隙：线条之间没接上的小缝（闭运算），补出来的地方并到旁边最近的那一层
+    if (p.gap > 0) {
+      const r = p.gap / 2, cl = erode(sp, dilate(sp, body, r), r);
+      const n = body.length, W = sp.w, lab = new Int8Array(n).fill(-1), q = new Int32Array(n);
+      const add = i => { if (cl[i] <= body[i] + 1e-3) return false; const [x, y] = sp.mm(i % W, (i / W) | 0); return !(Math.abs(x) < winW / 2 && Math.abs(y) < winH / 2); };
+      let qh = 0, qt = 0;
+      for (let i = 0; i < n; i++) {
+        let best = -1, bv = 0.5;
+        for (let k = 0; k < feats.length; k++) if (feats[k].f[i] >= bv) { bv = feats[k].f[i]; best = k; }
+        if ((lab[i] = best) >= 0) q[qt++] = i;
+      }
+      while (qh < qt) {
+        const i = q[qh++], x = i % W;
+        for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) {
+          if (j < 0 || j >= n || lab[j] >= 0 || !add(j)) continue;
+          const k = lab[j] = lab[i];
+          feats[k].f[j] = Math.max(feats[k].f[j], cl[j]);
+          body[j] = cl[j]; hpx[j] = bands[k].h;
+          q[qt++] = j;
         }
       }
     }

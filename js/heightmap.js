@@ -3,7 +3,7 @@
  * 白色 = 最高，灰色 = 次高 …… 黑色 / 透明 = 空。
  * 图中间被实体包围的最大空区域 = 相片窗口。
  */
-import { Art } from './engine.js?v=33';
+import { Art } from './engine.js?v=34';
 
 // ---------- 旋转 ----------
 const rotCache = new WeakMap();
@@ -141,8 +141,11 @@ export function analyzeHM(art, { invert, emptyT }) {
   for (const l of levels) { let c = 0; for (let i = 0; i < n; i++) if (b[i] >= l.lo && b[i] < l.hi) c++; l.share = c / solid; }
 
   // 2) 相片窗口：被实体围起来的最大空区域
-  const empty = new Uint8Array(n);
-  for (let i = 0; i < n; i++) empty[i] = b[i] < emptyT ? 1 : 0;
+  // 线条有小断口时窗口会和外面连通：先把实体外扩 R 像素（补上小缝）再找，找到后框再放大 R
+  const R = 3, solidM = new Uint8Array(n), rowM = new Uint8Array(n), empty = new Uint8Array(n);
+  for (let i = 0; i < n; i++) solidM[i] = b[i] < emptyT ? 0 : 1;
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) { let v = 0; for (let d = -R; d <= R && !v; d++) { const xx = x + d; if (xx >= 0 && xx < cw && solidM[y * cw + xx]) v = 1; } rowM[y * cw + x] = v; }
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) { let v = 0; for (let d = -R; d <= R && !v; d++) { const yy = y + d; if (yy >= 0 && yy < ch && rowM[yy * cw + x]) v = 1; } empty[y * cw + x] = v ? 0 : 1; }
   const lab = new Int32Array(n); // 0 未访问, -1 外部, >0 封闭空区编号
   const stack = new Int32Array(n);
   const flood = (start, id) => {
@@ -161,10 +164,10 @@ export function analyzeHM(art, { invert, emptyT }) {
   let best = null, id = 1;
   for (let i = 0; i < n; i++) if (empty[i] && !lab[i]) { const r = flood(i, ++id); if (!best || r.cnt > best.cnt) best = r; }
   let cx0 = Infinity, cy0 = Infinity, cx1 = -1, cy1 = -1;
-  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) if (!empty[y * cw + x]) { if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; if (y < cy0) cy0 = y; if (y > cy1) cy1 = y; }
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) if (solidM[y * cw + x]) { if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; if (y < cy0) cy0 = y; if (y > cy1) cy1 = y; }
   const toSrc = (x0, y0, x1, y1) => ({ x: x0 / s, y: y0 / s, w: (x1 - x0 + 1) / s, h: (y1 - y0 + 1) / s });
   const content = toSrc(cx0, cy0, cx1, cy1);
-  const win = best && best.cnt > solid * 0.02 ? toSrc(best.x0, best.y0, best.x1, best.y1) : null;
+  const win = best && best.cnt > solid * 0.02 ? toSrc(best.x0 - R, best.y0 - R, best.x1 + R, best.y1 + R) : null;
   const res = { levels, win, content };
   m.set(key, res);
   return res;
