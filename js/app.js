@@ -1,14 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=34';
-import { TOOLS } from './tools.js?v=34';
-import { SAMPLES } from './samples.js?v=34';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=34';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=34';
-import { getFit, setFit } from './parts.js?v=34';
-import { export3MF } from './export3mf.js?v=34';
-import { makeBatch } from './batch.js?v=34';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=34';
+import { Viewer, Thumbnailer } from './viewer.js?v=35';
+import { TOOLS } from './tools.js?v=35';
+import { SAMPLES } from './samples.js?v=35';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=35';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=35';
+import { getFit, setFit } from './parts.js?v=35';
+import { export3MF } from './export3mf.js?v=35';
+import { makeBatch } from './batch.js?v=35';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=35';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
