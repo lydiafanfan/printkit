@@ -9,9 +9,9 @@
  * 打开“自动生成”后，网页开着时每隔几秒看一次文件夹，没生成过的照片自动生成；
  * 已经生成过的不会自己重新生成（除非照片换了新的），要用新参数重做就点“全部重新生成”。
  */
-import { artFromFile } from './engine.js?v=42';
-import { previewHM } from './heightmap.js?v=42';
-import { estimate } from './estimate.js?v=42';
+import { artFromFile } from './engine.js?v=44';
+import { previewHM } from './heightmap.js?v=44';
+import { estimate } from './estimate.js?v=44';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -46,6 +46,7 @@ const idb = (() => {
  * 批量一次只给一个工具用（B.toolId）；自动生成时你切到别的工具也没关系，用的还是这个工具和它的参数。
  */
 export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onState = () => {} }) {
+  const bfmt = () => (S.fmt === 'glb' ? '3mf' : S.fmt); // 批量只出 3MF / STL；选了 GLB 时批量按 3MF
   const dlg = document.getElementById('batch');
   const B = { toolId: 'framestudio', items: [], sig: '', edit: null, running: false, done: 0, total: 0, dir: null, outRoot: null, outDir: null, watch: false, saved: null, timer: 0, ignored: new Set(), loggedP: '' };
   const tool = () => getTool(B.toolId), P = () => getP(B.toolId);
@@ -58,7 +59,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
 
   const totalG = () => B.items.reduce((a, i) => a + (i.out?.g || 0), 0);
   const itemP = it => isHM() ? { ...P(), winMode: it.mode, winBox: it.box } : P();
-  const sigOf = () => { const p = { ...P() }; delete p.winMode; delete p.winBox; return JSON.stringify([B.toolId, p, S.img, S.fmt]); };
+  const sigOf = () => { const p = { ...P() }; delete p.winMode; delete p.winBox; return JSON.stringify([B.toolId, p, S.img, bfmt()]); };
   const boxOf = b => ({ cx: b.cx, cy: b.cy, w: b.w, h: b.h });
   const oval = () => P().winShape === 'oval' ? 'oval' : '';
 
@@ -156,7 +157,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
     if (B.edit) return renderEdit();
     const its = B.items, ready = its.filter(i => i.state === 'ready').length, need = its.filter(i => i.state === 'need').length;
     const loading = its.filter(i => i.state === 'loading').length;
-    const ext = S.fmt.toUpperCase();
+    const ext = bfmt().toUpperCase();
     const fresh = its.filter(i => i.state === 'ready' && !i.written).length;
     const t = tool();
     const sum = B.running ? `正在生成 ${B.done + 1} / ${B.total}…`
@@ -226,7 +227,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
   }
   /** 输出文件夹里已经有比照片新的结果 → 算生成过 */
   async function existing(it, mtime) {
-    for (const ext of [S.fmt, S.fmt === '3mf' ? 'stl' : '3mf']) {
+    for (const ext of [bfmt(), bfmt() === '3mf' ? 'stl' : '3mf']) {
       try {
         const nm = outName(it, ext), f = await (await B.outDir.getFileHandle(nm)).getFile();
         if (f.lastModified >= mtime) return { name: nm, sig: null, g: null };
@@ -298,7 +299,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
     const c = (t.cardParams || []).filter(c => !c.show || c.show(p)).map(c => `${c.label} ${fmtV(c, p[c.k])}`);
     if (c.length) lines.push(`  相框图：${c.join('，')}`);
     const e = S.est;
-    lines.push(`  导出：${S.fmt.toUpperCase()}；耗材估算按 ${e.mat}、填充 ${e.infill}%、墙 ${e.walls} 层`);
+    lines.push(`  导出：${bfmt().toUpperCase()}；耗材估算按 ${e.mat}、填充 ${e.infill}%、墙 ${e.walls} 层`);
     return lines.join('\n');
   }
   async function appendLog(text) {
@@ -312,7 +313,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
     if (!todo.length || B.running || !B.dir) return;
     B.running = true; B.done = 0; B.total = todo.length;
     render();
-    const t = tool(), fmt = S.fmt, sig = sigOf(), log = [];
+    const t = tool(), fmt = bfmt(), sig = sigOf(), log = [];
     const pt = paramsText();
     if (pt !== B.loggedP) { B.loggedP = pt; log.push(`\n—— ${new Date().toLocaleString('zh-CN')} 起「${t.name}」用的参数 ——\n${pt}\n`); }
     let ok = 0, g = 0;
@@ -391,7 +392,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
     if (!todo.length || B.running) return;
     B.running = true; B.done = 0; B.total = todo.length;
     render();
-    const files = {}, used = new Set(), log = [], t = tool(), fmt = S.fmt;
+    const files = {}, used = new Set(), log = [], t = tool(), fmt = bfmt();
     let ok = 0;
     for (const it of todo) {
       await tick();

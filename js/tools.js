@@ -1,10 +1,11 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=42';
-import { PARTS, getFit } from './parts.js?v=42';
-import { JOINER } from './joiner.js?v=42';
-import { PARTS2 } from './parts2.js?v=42';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=42';
+import { FRAME_STUDIO } from './framestudio.js?v=44';
+import { PARTS, getFit } from './parts.js?v=44';
+import { JOINER } from './joiner.js?v=44';
+import { PARTS2 } from './parts2.js?v=44';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=44';
+import { SOLID, unionGeos } from './solid.js?v=44';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -616,6 +617,7 @@ function makeHandle(type, sp, plate, H) {
   return { geo, recess, note: `${how}（手柄最多约 ${grams < 1 ? grams.toFixed(1) : Math.round(grams)} g 耗材）` };
 }
 function mergeGeos(list) {
+  if (SOLID.on) { const u = unionGeos(list); if (u) { list.forEach(g => g.dispose()); return u; } } // 编辑用导出：合成一个实体
   const n = list.reduce((a, g) => a + g.attributes.position.count, 0), pos = new Float32Array(n * 3);
   let k = 0; for (const g of list) { pos.set(g.attributes.position.array, k); k += g.attributes.position.array.length; g.dispose(); }
   const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.computeVertexNormals();

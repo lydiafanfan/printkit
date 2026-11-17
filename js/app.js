@@ -1,14 +1,16 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=42';
-import { TOOLS } from './tools.js?v=42';
-import { SAMPLES } from './samples.js?v=42';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=42';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=42';
-import { getFit, setFit } from './parts.js?v=42';
-import { export3MF } from './export3mf.js?v=42';
-import { makeBatch } from './batch.js?v=42';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=42';
+import { Viewer, Thumbnailer } from './viewer.js?v=44';
+import { TOOLS } from './tools.js?v=44';
+import { SAMPLES } from './samples.js?v=44';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=44';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=44';
+import { getFit, setFit } from './parts.js?v=44';
+import { export3MF } from './export3mf.js?v=44';
+import { exportGLB } from './exportglb.js?v=44';
+import { SOLID, manifoldReady, solidMesh } from './solid.js?v=44';
+import { makeBatch } from './batch.js?v=44';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=44';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -925,8 +927,15 @@ function hideError() { $('#vpError').hidden = true; }
 $('#fab').addEventListener('click', () => $('#download').click());
 // ---------- 下载（3MF / STL） ----------
 S.fmt = LS.get('fmt', '3mf');
+const FMT_TIP = {
+  '3mf': '3MF：零件分开，Bambu Studio 可直接分色',
+  stl: 'STL：所有零件在一个文件里，哪个切片软件都能开',
+  glb: 'GLB：拿到 Blender / Nomad 里再改，封闭网格、精度加倍',
+};
 function renderFmt() {
+  if (!FMT_TIP[S.fmt]) S.fmt = '3mf';
   document.querySelectorAll('#fmtSeg button').forEach(b => b.classList.toggle('on', b.dataset.fmt === S.fmt));
+  $('#fmtSeg').dataset.tip = FMT_TIP[S.fmt];
   $('#fabFmt').textContent = S.fmt.toUpperCase();
 }
 renderFmt();
@@ -948,10 +957,60 @@ const batch = makeBatch({
   onState: () => { if (!$('#studio').hidden && batchable(tool()) && !$('#batch').open) renderPanel(); },
 });
 $('#batch').addEventListener('close', () => { if (!$('#studio').hidden && tool().kind === 'heightmap') refreshGroups(); else if (!$('#studio').hidden && batchable(tool())) renderPanel(); });
-$('#download').addEventListener('click', () => {
+const saveBlob = (data, type, file) => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type }));
+  a.download = file;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+};
+/** 编辑用（GLB）：网格加密重新生成一遍，每个零件合成封闭实体 → { data, bad: [没合成的零件名], tris } */
+async function editablePack() {
+  const t = tool();
+  await manifoldReady();
+  let parts, res = null;
+  if (t.kind === 'mesh') parts = lastResult?.exportParts ? lastResult.exportParts() : S.parts.map(p => ({ ...p, geo: p.geo.clone() }));
+  else {
+    const art = t.kind === 'heightmap' ? S.hmArt : t.kind === 'param' ? null : S.art;
+    SOLID.on = true; SOLID.fine = 2;
+    try { res = t.build(art, S.img, P()); } finally { SOLID.on = false; SOLID.fine = 1; }
+    parts = res.exportParts ? res.exportParts() : res.parts;
+  }
+  if (!res?.keepLayout) layoutParts(parts);
+  const base = partColors(res ? res.parts : S.parts);
+  const colors = parts.map((p, i) => (res?.exportParts || lastResult?.exportParts) ? ((res || lastResult).parts[i]?.color ? base[i] : base[0]) : base[i]);
+  const bad = [];
+  let tris = 0;
+  const meshes = parts.map((p, i) => {
+    const m = solidMesh(p.geo);
+    if (!m.ok) bad.push(p.label || `零件 ${i + 1}`);
+    tris += m.idx.length / 3;
+    return { pos: m.pos, idx: m.idx, label: p.label || `零件 ${i + 1}`, color: colors[i] };
+  });
+  parts.forEach(p => p.geo.dispose());
+  if (res && parts !== res.parts) res.parts.forEach(p => p.geo.dispose());
+  return { data: exportGLB(meshes), bad, tris };
+}
+$('#download').addEventListener('click', async () => {
   if (!S.parts.length) return;
   const d = new Date();
   const name = `${tool().name}-${d.getMonth() + 1}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  if (S.fmt === 'glb') {
+    const btns = [$('#download'), $('#fab')];
+    btns.forEach(b => { b.disabled = true; }); $('#busy').classList.add('on');
+    await new Promise(r => setTimeout(r, 40)); // 先让“生成中”显示出来
+    try {
+      const { data, bad, tris } = await editablePack();
+      saveBlob(data, 'model/gltf-binary', `${name}.glb`);
+      toast(bad.length ? `GLB 已下载，但「${bad.join('、')}」没能合成封闭实体，是按原样导出的` : `GLB 已下载（${Math.round(tris).toLocaleString()} 个三角面）：拖进 Blender 或 Nomad 就能改，1 单位 = 1mm`);
+    } catch (err) {
+      console.error(err);
+      toast('没能生成 GLB：' + (err.message || err));
+    } finally {
+      btns.forEach(b => { b.disabled = false; }); $('#busy').classList.remove('on');
+    }
+    return;
+  }
   const is3mf = S.fmt === '3mf';
   const { data } = exportPack({ parts: S.parts, keepLayout: true, exportParts: lastResult?.exportParts }, S.fmt);
   const blob = new Blob([data], { type: is3mf ? 'model/3mf' : 'model/stl' });

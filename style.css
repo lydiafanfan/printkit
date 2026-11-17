@@ -645,3 +645,12 @@ body { background: var(--bg); }
 .tb-sep { display: block; }
 .bt-open { border-radius: 14px; margin-top: 2px; }
 @media (max-width: 900px) { .tb-sep { display: none; } #viewTop { display: none; } }
+
+/* 手机：工具栏放了 3 个格式按钮后，标题单行省略，撤销/视角按钮收紧 */
+@media (max-width: 520px) {
+  .tb-title b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-title > div { min-width: 0; }
+  .toolbar { gap: 6px; }
+  .fmt button { padding: 6px 8px; }
+  #viewTop, #viewFlip, .tb-group .tb-sep { display: none; }
+}

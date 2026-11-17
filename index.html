@@ -6,7 +6,7 @@
   <title>打印助手</title>
   <meta name="theme-color" content="#f7f6f3">
   <link rel="icon" href="icon.svg?v=2" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=42">
+  <link rel="stylesheet" href="style.css?v=44">
   <script type="importmap">
   {
     "imports": {
@@ -50,7 +50,7 @@
           <button class="tb-btn" id="viewFlip" data-tip="翻面查看 · R"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M8 7L4 12l4 5"/><path d="M16 7l4 5-4 5"/></svg></button>
         </div>
         <div class="dl">
-          <div class="fmt" id="fmtSeg" data-tip="3MF：零件分开，Bambu Studio 可直接分色"><button data-fmt="3mf">3MF</button><button data-fmt="stl">STL</button></div>
+          <div class="fmt" id="fmtSeg" data-tip="3MF：零件分开，Bambu Studio 可直接分色"><button data-fmt="3mf">3MF</button><button data-fmt="stl">STL</button><button data-fmt="glb">GLB</button></div>
           <button class="btn-primary" id="download" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
             <span>下载</span><kbd id="kbdSave">⌘S</kbd>
@@ -97,6 +97,6 @@
   window.addEventListener('error', function (e) { var w = document.getElementById('bootWhy'); if (w && !window.printkit) w.textContent = '出错信息：' + (e.message || (e.target && (e.target.src || e.target.href)) || '未知'); }, true);
   setTimeout(function () { if (!window.printkit) document.getElementById('bootFail').hidden = false; }, 10000);
 </script>
-<script type="module" src="js/app.js?v=42"></script>
+<script type="module" src="js/app.js?v=44"></script>
 </body>
 </html>

@@ -5,7 +5,8 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { Space, trace } from './engine.js?v=42';
+import { Space, trace } from './engine.js?v=44';
+import { SOLID, unionGeos } from './solid.js?v=44';
 
 const CS = 48; // 圆弧细分（ExtrudeGeometry 会再乘系数，误差 < 0.005mm）
 const r2 = v => Math.round(v * 100) / 100;
@@ -30,7 +31,10 @@ function extrude(shapes, z0, z1) {
   g.translate(0, 0, z0);
   return g.index ? g.toNonIndexed() : g;
 }
-function merge(geos) { const m = mergeGeometries(geos.filter(Boolean), false); geos.forEach(g => g && g.dispose()); return m; }
+function merge(geos) {
+  const u = SOLID.on ? unionGeos(geos.filter(Boolean)) : null; // 编辑用导出：几段挤出合成一个实体
+  const m = u || mergeGeometries(geos.filter(Boolean), false); geos.forEach(g => g && g.dispose()); return m;
+}
 
 /** 文字 → 多边形（毫米，y 向上）；返回 {outers:[[Vector2]], islands:[[Vector2]]} */
 function textPolys(text, cx, cy, h) {

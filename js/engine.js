@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { SOLID, W, geoFrom } from './solid.js?v=44';
 
 // ---------------------------------------------------------------------------
 //  毫米网格
@@ -17,6 +18,10 @@ export class Space {
   /** 覆盖 [xmin,xmax]×[ymin,ymax]（毫米，y 向下），最长边约 maxPx 像素 */
   constructor(xmin, ymin, xmax, ymax, maxPx = 800) {
     this.res = Math.max(Math.max(xmax - xmin, ymax - ymin) / maxPx, 0.05);
+    if (SOLID.on && SOLID.fine > 1) { // 编辑用导出：网格加密，但总像素封顶（约 900 万），免得内存吃不消
+      const fine = Math.max(this.res / SOLID.fine, Math.sqrt((xmax - xmin) * (ymax - ymin) / 9e6), 0.025);
+      this.res = Math.min(this.res, fine);
+    }
     this.w = Math.ceil((xmax - xmin) / this.res);
     this.h = Math.ceil((ymax - ymin) / this.res);
     this.x0 = xmin; this.y0 = ymin;
@@ -413,7 +418,7 @@ export function buildSolid(sp, features) {
     if (prev && prev.key === key && Math.abs(prev.z1 - za) < 1e-6) { prev.z1 = zb; continue; }
     layers.push({ key, z0: za, z1: zb, act });
   }
-  const geos = [];
+  const geos = [], mans = [];
   for (const L of layers) {
     const adds = L.act.filter(a => a.op !== 'sub').map(a => a.f);
     if (!adds.length) continue;
@@ -422,6 +427,12 @@ export function buildSolid(sp, features) {
     if (subs.length) f = F.sub(f, ...subs);
     const polys = trace(sp, f);
     if (!polys.length) continue;
+    if (SOLID.on) { // 编辑用：每层挤出成实体，最后做并集，层与层之间不留重叠面
+      const cs = new W.CrossSection(polys.flatMap(p => [p.outer, ...p.holes]).map(lp => lp.map(([x, y]) => [x, -y])), 'EvenOdd');
+      mans.push(cs.extrude(L.z1 - L.z0).translate([0, 0, L.z0]));
+      cs.delete();
+      continue;
+    }
     const shapes = polys.map(p => {
       const s = new THREE.Shape(p.outer.map(([x, y]) => new THREE.Vector2(x, -y)));
       s.holes = p.holes.map(h => new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, -y))));
@@ -430,6 +441,13 @@ export function buildSolid(sp, features) {
     const geo = new THREE.ExtrudeGeometry(shapes, { depth: L.z1 - L.z0, bevelEnabled: false, curveSegments: 1, steps: 1 });
     geo.translate(0, 0, L.z0);
     geos.push(geo);
+  }
+  if (SOLID.on) {
+    if (!mans.length) return null;
+    const u = W.Manifold.union(mans);
+    mans.forEach(m => m.delete());
+    const geo = geoFrom(u); u.delete();
+    return geo;
   }
   if (!geos.length) return null;
   const merged = mergeGeometries(geos, false);

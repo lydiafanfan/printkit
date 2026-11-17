@@ -1,6 +1,7 @@
 # 打印助手 PrintKit
 
 在浏览器里把图案、文字和参数变成可以直接 3D 打印的模型，导出 3MF / STL。
+想在 Blender、Nomad Sculpt 里再加工，就选 **GLB**：网格精度加倍，每个零件都合成一个封闭实体（没有重叠面），可以直接布尔运算、平滑、重新拓扑；单位 1 = 1mm。
 所有模型都在你的设备上生成，不会上传任何文件。针对 **Bambu Lab P1S**（256³ mm，0.4 喷嘴，Bambu Studio）调好了默认值。
 
 **在线使用：** https://lydiafanfan.github.io/printkit/
@@ -73,6 +74,8 @@ js/heightmap.js   高度图分析
 js/parts.js       公差测试件、收纳盒
 js/parts2.js      线轴架、标签牌、侧插扣
 js/joiner.js      拼接连接件（读取、修补、布尔运算）
+js/solid.js       manifold 加载、网格修补、编辑用（GLB）导出时合成封闭实体
 js/export3mf.js   3MF 导出
+js/exportglb.js   GLB 导出（Blender / Nomad 二次编辑）
 js/viewer.js      3D 预览与缩略图
 ```
