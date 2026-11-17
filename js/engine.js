@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { SOLID, W, geoFrom } from './solid.js?v=51';
+import { SOLID, W, geoFrom } from './solid.js?v=57';
 
 // ---------------------------------------------------------------------------
 //  毫米网格

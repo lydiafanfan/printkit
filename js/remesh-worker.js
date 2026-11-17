@@ -1,5 +1,5 @@
 // 后台线程里重排三角面，页面不会卡住
-import { remeshFlat } from './remesh.js?v=51';
+import { remeshFlat } from './remesh.js?v=57';
 onmessage = e => {
   const { id, pos, idx, L } = e.data;
   try {

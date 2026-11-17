@@ -1,16 +1,16 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=51';
-import { TOOLS } from './tools.js?v=51';
-import { SAMPLES } from './samples.js?v=51';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=51';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=51';
-import { getFit, setFit } from './parts.js?v=51';
-import { export3MF } from './export3mf.js?v=51';
-import { exportGLB } from './exportglb.js?v=51';
-import { SOLID, manifoldReady, solidMesh, sameSolid } from './solid.js?v=51';
-import { makeBatch } from './batch.js?v=51';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=51';
+import { Viewer, Thumbnailer } from './viewer.js?v=57';
+import { TOOLS } from './tools.js?v=57';
+import { SAMPLES } from './samples.js?v=57';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=57';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=57';
+import { getFit, setFit } from './parts.js?v=57';
+import { export3MF } from './export3mf.js?v=57';
+import { exportGLB } from './exportglb.js?v=57';
+import { SOLID, manifoldReady, solidMesh, sameSolid } from './solid.js?v=57';
+import { makeBatch } from './batch.js?v=57';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=57';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -972,7 +972,7 @@ function remeshInWorkers(jobs, L, onProgress) {
   let next = 0, done = 0;
   return new Promise(resolve => {
     for (let w = 0; w < n; w++) {
-      const worker = new Worker(new URL('./remesh-worker.js?v=51', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('./remesh-worker.js?v=57', import.meta.url), { type: 'module' });
       const feed = () => {
         if (next >= order.length) { worker.terminate(); return; }
         const id = order[next++], j = jobs[id];

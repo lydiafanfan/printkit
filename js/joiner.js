@@ -8,9 +8,9 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { Space, F, distInside } from './engine.js?v=51';
-import { getFit } from './parts.js?v=51';
-import { W, manifoldReady, weld, splitComponents, orient, fillHoles, toManifold, geoFrom } from './solid.js?v=51';
+import { Space, F, distInside } from './engine.js?v=57';
+import { getFit } from './parts.js?v=57';
+import { W, manifoldReady, weld, splitComponents, orient, fillHoles, toManifold, geoFrom } from './solid.js?v=57';
 export { manifoldReady, geoFrom }; // 参数零件（parts2）从这里引用
 
 const PART_COLORS = ['#8fd3c1', '#f2b6a0', '#f3d98e', '#b3a8ea', '#9fc3ea', '#e9a6c0', '#c7d98f', '#d9b28a'];

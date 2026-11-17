@@ -6,9 +6,9 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=51';
-import { getFit } from './parts.js?v=51';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=51';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=57';
+import { getFit } from './parts.js?v=57';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=57';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -35,7 +35,7 @@ export const FRAME_STUDIO = {
     rotate: 0, invert: false, emptyT: 0.12, smooth: 0, gap: 0.6, hmode: 'levels', split: 'lum', ams: 'on', amsBase: 1.2, flatH: 4, levelH: [], maxH: 6, minH: 3,
     fit: 'photo', width: 140, photo: 'r3', pw: 89, ph: 127, lip: 4,
     holder: 'full', holderFit: 'follow', insert: 'top', slotT: 1.0, wall: 4, backT: 1.6, rail: 5, cover: 100, tol: 0.2, attach: 'glue', cornerN: '4',
-    keyhole: true, keyPos: 'top', keyN: '2', magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
+    keyhole: true, magnet: false, magN: '4', magPos: 'auto', magD: 10, magT: 3, loop: false, loopD: 4,
     stand: true, standStyle: 'arch', tilt: 12, tongueW: 30, tongueL: 8, tongueT: 3, baseW: 70, baseD: 40, baseH: 14,
   },
   groups: [
@@ -82,9 +82,7 @@ export const FRAME_STUDIO = {
       { k: 'cornerN', label: '卡角数量', hint: '对角：左上 + 右下两个，照片两头都卡住；下面：只卡住底下两个角，照片从上面放进去', type: 'seg', options: [['4', '四个'], ['2d', '两个（对角）'], ['2b', '两个（下面）']], show: p => p.holder === 'corners' },
     ] },
     { title: '挂件 / 冰箱贴', params: [
-      { k: 'keyhole', label: '钥匙孔挂钉', hint: '背面挖钥匙孔，挂在钉子上', type: 'toggle' },
-      { k: 'keyPos', label: '挂钉孔位置', hint: '中间：在相框半高处，左右边框上各一个', type: 'seg', options: [['top', '上面'], ['mid', '中间（两边）']], show: p => p.keyhole },
-      { k: 'keyN', label: '挂钉孔数量', hint: '一个：正中间，只要一颗钉子；两个：左右各一，挂得更稳不容易歪', type: 'seg', options: [['1', '一个'], ['2', '两个']], show: p => p.keyhole && p.keyPos !== 'mid' },
+      { k: 'keyhole', label: '钥匙孔挂钉', hint: '背面上方中间挖一个钥匙孔，挂在一颗钉子上。会自动放在相框重心正上方附近，挂起来是正的', type: 'toggle' },
       { k: 'magnet', label: '冰箱磁铁坑', type: 'toggle' },
       { k: 'magN', label: '磁铁数量', type: 'seg', options: [['2', '上面 2 个'], ['3', '上 2 下 1'], ['4', '四角 4 个']], show: p => p.magnet },
       { k: 'magPos', label: '磁铁位置', hint: '自动：每个磁铁各自去离角落最近、又够厚的地方，不强求对称', type: 'seg', options: [['auto', '跟着形状自动找'], ['sym', '左右对称']], show: p => p.magnet },
@@ -315,14 +313,15 @@ export const FRAME_STUDIO = {
       if (p.stand && Math.abs(x) < p.tongueW / 2 + 2 && y > tongueY0 - 8) return false;
       return true;
     };
-    const fitsDisk = (cx, cy, r, need) => {
-      for (let a = 0; a < 16; a++) { const t = a * Math.PI / 8; if (!free(cx + Math.cos(t) * r, cy + Math.sin(t) * r, need)) return false; }
-      return free(cx, cy, need) && free(cx + r / 2, cy, need) && free(cx - r / 2, cy, need) && free(cx, cy + r / 2, need) && free(cx, cy - r / 2, need);
+    const fitsDisk = (cx, cy, r, need, ok = free) => {
+      for (let a = 0; a < 16; a++) { const t = a * Math.PI / 8; if (!ok(cx + Math.cos(t) * r, cy + Math.sin(t) * r, need)) return false; }
+      return ok(cx, cy, need) && ok(cx + r / 2, cy, need) && ok(cx - r / 2, cy, need) && ok(cx, cy + r / 2, need) && ok(cx, cy - r / 2, need);
     };
     const back = [];   // 从背面挖掉的形状
     const taken = [];  // 已经占用的背面位置 [x, y0, y1, r]：竖向胶囊
     const clear = (x, y, rr) => taken.every(([tx, ty0, ty1, tr]) => Math.hypot(x - tx, y - Math.max(ty0, Math.min(ty1, y))) >= rr + tr + 1.2);
     const magSpots = [], keySpots = [];
+    let keyFill = null; // 钥匙孔跨过的细缝，从背面补上的一小块
     if (p.magnet) {
       const r = p.magD / 2 + 0.15, depth = p.magT + 0.2, need = depth + 0.8;
       // 理想位置：外轮廓的角（上 2 / 上 2 下 1 / 四角）。每个磁铁去离理想位置最近、放得下的地方，不强求对称。
@@ -366,31 +365,60 @@ export const FRAME_STUDIO = {
       }
     }
     if (p.keyhole) {
+      // 一个钥匙孔，放在上方中间。挂在一颗钉子上时相框会绕钉子转到重心在正下方，
+      // 所以目标是“重心正上方”（不一定是几何正中）；那里放不下就往左右、往下找最近的地方。
       const need = 2.6 + 0.6;
-      const okAt = (x, y) => clear(x, y - 3.5, 4.6 + 3.5) && fitsDisk(x, y, 4.6, need) && fitsDisk(x, y - 7, 4.6, need) && fitsDisk(x, y - 3.5, 4.6, need);
-      const mid = p.keyPos === 'mid', one = !mid && p.keyN === '1';
-      let spots = null;
-      if (one) {
-        // 一个：正中线上，从上往下找第一个放得下的地方
-        for (let y = cy0 + 6; y < cy1 - 6 && !spots; y += 0.5) if (okAt(0, y)) spots = [[0, y]];
-      } else {
-        // 两个：左右对称一对。上面 = 从顶往下找；中间 = 从相框半高往上下两边找
-        const ys = [];
-        if (mid) { const yc = (cy0 + cy1) / 2; for (let d = 0; d < (cy1 - cy0) / 2; d += 1) { ys.push(yc - d); if (d) ys.push(yc + d); } }
-        else for (let y = cy0 + 6; y < cy1 - 6; y += 1) ys.push(y);
-        for (const y of ys) {
-          if (spots) break;
-          for (let x = cx1 - 6; x > 4; x -= 1) if (okAt(x, y) && okAt(-x, y)) { spots = [[x, y], [-x, y]]; break; }
+      let mx = 0, my = 0, mw = 0;
+      for (let j = 0; j < sp.h; j += 2) for (let i = 0; i < sp.w; i += 2) { const k = j * sp.w + i; if (body[k] < 0.5) continue; const w = hpx[k]; mx += (sp.x0 + (i + 0.5) * sp.res) * w; my += (sp.y0 + (j + 0.5) * sp.res) * w; mw += w; }
+      const gx = mw ? mx / mw : 0, gy = mw ? my / mw : 0; // 重心（按厚度加权）
+      const W = cx1 - cx0, H = cy1 - cy0;
+      // 图案里很细的缝（< 2mm，比如瓷砖之间的缝）挡在中间时，可以从背面补一小块把缝垫上，钥匙孔照样放在中间
+      const closed = erode(sp, dilate(sp, body, 1), 1), innerC = erode(sp, closed, 1.5);
+      const freeFill = (x, y, nd) => {
+        const i = pix(x, y);
+        if (i < 0 || innerC[i] < 0.5 || (body[i] >= 0.5 && hpx[i] < nd)) return false;
+        if (Math.abs(x) < hw + 1.5 && y > holderTop - 1.5 && y < hh + 1.5) return false;
+        if (p.stand && Math.abs(x) < p.tongueW / 2 + 2 && y > tongueY0 - 8) return false;
+        return true;
+      };
+      let spot = null, slot = 7, fill = false;
+      for (const L of [7, 5]) { // 滑槽 7mm 或 5mm，哪个能离重心更近用哪个（差不多时用 7mm）
+        const fits = (x, y, fr) => clear(x, y - L / 2, 4.6 + L / 2) && fitsDisk(x, y, 4.6, need, fr) && fitsDisk(x, y - L, 4.6, need, fr) && fitsDisk(x, y - L / 2, 4.6, need, fr);
+        const yTop = cy0 + L + 4.6 + 1, yMax = Math.min(gy - 15, cy0 + 0.5 * H); // 只在上半部分、离重心至少 15mm 以上找
+        const cands = [];
+        for (let y = yTop; y <= yMax; y += 0.5) for (let x = gx - 0.35 * W; x <= gx + 0.35 * W; x += 0.5) {
+          const c = 3 * Math.abs(x - gx) + (y - yTop) + (L === 5 ? 2 : 0); // 偏左右比往下更“贵”
+          cands.push([x, y, c, false], [x, y, c + 4, true]); // 要补缝的稍微“贵”一点
+        }
+        cands.sort((a, b) => a[2] - b[2]);
+        for (const [x, y, c, fl] of cands) {
+          if (spot && c >= spot[2]) break;
+          if (fits(x, y, fl ? freeFill : free)) { spot = [x, y, c]; slot = L; fill = fl; break; }
         }
       }
-      if (spots) {
-        for (const [x, y] of spots) {
-          back.push({ f: F.union(sp.circle(x, y, 4.2), sp.rect(x - 2.1, y - 7, 4.2, 7, 2.1)), z0: 0, z1: 1.0 });
-          back.push({ f: F.union(sp.circle(x, y, 4.4), sp.rect(x - 4.4, y - 7.5, 8.8, 7.5, 4.4)), z0: 1.0, z1: 2.6 });
-          taken.push([x, y - 7, y, 4.6]); keySpots.push([x, y]);
+      if (spot) {
+        if (fill) { // 只补钥匙孔周围的缝，高度刚好到钥匙孔顶
+          const [x, y] = spot, R = 6.6;
+          keyFill = { f: F.inter(F.sub(closed, body), sp.rect(x - R, y - slot - R, 2 * R, slot + 2 * R, R)), z0: 0, z1: need };
         }
-        notes.push(one ? '背面正中一个钥匙孔：钉子对准大圆孔按进去，再往下一拉就卡住。' : `背面${mid ? '左右两边半高处' : '上面'}两个钥匙孔：两颗钉子要钉在同一高度、间距 ${r1(Math.abs(spots[0][0]) * 2)}mm，对准大圆孔按进去再往下一拉就卡住。`);
-      } else warnings.push(`没地方放${one ? '正中间的' : mid ? '两边半高处的' : ''}钥匙孔${one ? '（中线上可能被夹层或图案挡住，可以改成两个）' : ''}：需要边框上有一块厚度 ≥ ${r1(need)}mm、且不被夹层挡住的地方。可以把边框层加高或换小一点的夹层外壁${magSpots.length ? '；当冰箱贴用的话也可以直接关掉钥匙孔' : ''}。`);
+        spot = spot.slice(0, 2);
+      }
+      const tiltOf = ([x, y]) => Math.atan2(Math.abs(x - gx), Math.max(1, gy - y)) * 180 / Math.PI;
+      let far = null;
+      if (spot && tiltOf(spot) > 8) { far = spot; spot = null; } // 歪得太厉害，挂了也不好用
+      if (spot) {
+        const [x, y] = spot;
+        back.push({ f: F.union(sp.circle(x, y, 4.2), sp.rect(x - 2.1, y - slot, 4.2, slot, 2.1)), z0: 0, z1: 1.0 });
+        back.push({ f: F.union(sp.circle(x, y, 4.4), sp.rect(x - 4.4, y - slot - 0.5, 8.8, slot + 0.5, 4.4)), z0: 1.0, z1: 2.6 });
+        taken.push([x, y - slot, y, 4.6]); keySpots.push([x, y]);
+        const off = x - gx, tilt = tiltOf(spot);
+        const where = Math.abs(x) < 1 ? '上方正中' : `上方中间偏${x > 0 ? '右' : '左'} ${r1(Math.abs(x))}mm（从正面看）`;
+        notes.push(`背面${where}有一个钥匙孔：钉子对准大圆孔按进去，再往下一拉就卡住。` + (tilt <= 2 ? '它在相框重心正上方，挂起来是正的。' : '') + (keyFill ? `那里图案有一条细缝，从背面垫了一小块（${r1(need)}mm 高）把钥匙孔托住，正面看缝还在，只是浅一点。` : ''));
+        if (tilt > 2) warnings.push(`重心正上方那里边框太窄或是空的，钥匙孔只能放在偏 ${r1(Math.abs(off))}mm 的地方，挂上去大约会歪 ${Math.round(tilt)}°。挂好后把相框扶正，在下边两个角的背面各贴一小块无痕胶或蓝丁胶就不会歪了。`);
+      } else {
+        const why = far ? `最近能放的地方离重心偏了 ${r1(Math.abs(far[0] - gx))}mm，挂上去会歪 ${Math.round(tiltOf(far))}° 左右，所以没放` : '需要一块约 9mm 宽、14mm 高、厚度 ≥ ' + r1(need) + 'mm、且不被夹层挡住的边框';
+        warnings.push(`上方中间放不下钥匙孔（${why}）。可以打开「顶部挂绳环」用绳子挂，或者把边框层加高、换窄一点的夹层外壁${magSpots.length ? '；当冰箱贴用的话也可以直接关掉钥匙孔' : ''}。`);
+      }
     }
     if (pin) { // 销孔：口小（颈）里面大（卡槽），销头的倒钩过了颈就卡住
       back.push({ f: F.union(...pinList.map(([x, y]) => sp.circle(x, y, pin.Rn))), z0: 0, z1: pin.neck });
@@ -399,6 +427,7 @@ export const FRAME_STUDIO = {
 
     // ---- 挂绳环 & 底座插片（只加在背面那一层厚度里） ----
     const extra = [];
+    if (keyFill) extra.push(keyFill);
     if (p.loop) {
       const [, ey] = edgeAlong(sp, body, 0, 0, 90);
       const cy = ey - loopR + 3;

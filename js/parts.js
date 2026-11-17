@@ -5,8 +5,8 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { Space, trace } from './engine.js?v=51';
-import { SOLID, unionGeos } from './solid.js?v=51';
+import { Space, trace } from './engine.js?v=57';
+import { SOLID, unionGeos } from './solid.js?v=57';
 
 const CS = 48; // 圆弧细分（ExtrudeGeometry 会再乘系数，误差 < 0.005mm）
 const r2 = v => Math.round(v * 100) / 100;
