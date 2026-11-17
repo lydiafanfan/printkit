@@ -9,9 +9,9 @@
  * 打开“自动生成”后，网页开着时每隔几秒看一次文件夹，没生成过的照片自动生成；
  * 已经生成过的不会自己重新生成（除非照片换了新的），要用新参数重做就点“全部重新生成”。
  */
-import { artFromFile } from './engine.js?v=44';
-import { previewHM } from './heightmap.js?v=44';
-import { estimate } from './estimate.js?v=44';
+import { artFromFile } from './engine.js?v=46';
+import { previewHM } from './heightmap.js?v=46';
+import { estimate } from './estimate.js?v=46';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

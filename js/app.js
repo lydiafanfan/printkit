@@ -1,16 +1,16 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=44';
-import { TOOLS } from './tools.js?v=44';
-import { SAMPLES } from './samples.js?v=44';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=44';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=44';
-import { getFit, setFit } from './parts.js?v=44';
-import { export3MF } from './export3mf.js?v=44';
-import { exportGLB } from './exportglb.js?v=44';
-import { SOLID, manifoldReady, solidMesh } from './solid.js?v=44';
-import { makeBatch } from './batch.js?v=44';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=44';
+import { Viewer, Thumbnailer } from './viewer.js?v=46';
+import { TOOLS } from './tools.js?v=46';
+import { SAMPLES } from './samples.js?v=46';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=46';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=46';
+import { getFit, setFit } from './parts.js?v=46';
+import { export3MF } from './export3mf.js?v=46';
+import { exportGLB } from './exportglb.js?v=46';
+import { SOLID, manifoldReady, solidMesh } from './solid.js?v=46';
+import { makeBatch } from './batch.js?v=46';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=46';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -930,7 +930,7 @@ S.fmt = LS.get('fmt', '3mf');
 const FMT_TIP = {
   '3mf': '3MF：零件分开，Bambu Studio 可直接分色',
   stl: 'STL：所有零件在一个文件里，哪个切片软件都能开',
-  glb: 'GLB：拿到 Blender / Nomad 里再改，封闭网格、精度加倍',
+  glb: 'GLB：拿到 Blender / Nomad 里再改，封闭网格、边缘更细',
 };
 function renderFmt() {
   if (!FMT_TIP[S.fmt]) S.fmt = '3mf';
@@ -964,7 +964,7 @@ const saveBlob = (data, type, file) => {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 };
-/** 编辑用（GLB）：网格加密重新生成一遍，每个零件合成封闭实体 → { data, bad: [没合成的零件名], tris } */
+/** 编辑用（GLB）：重新生成一遍（描边加密），每个零件合成封闭实体 → { data, bad: [没合成的零件名], tris } */
 async function editablePack() {
   const t = tool();
   await manifoldReady();

@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { SOLID, W, geoFrom } from './solid.js?v=44';
+import { SOLID, W, geoFrom } from './solid.js?v=46';
 
 // ---------------------------------------------------------------------------
 //  毫米网格
@@ -18,10 +18,6 @@ export class Space {
   /** 覆盖 [xmin,xmax]×[ymin,ymax]（毫米，y 向下），最长边约 maxPx 像素 */
   constructor(xmin, ymin, xmax, ymax, maxPx = 800) {
     this.res = Math.max(Math.max(xmax - xmin, ymax - ymin) / maxPx, 0.05);
-    if (SOLID.on && SOLID.fine > 1) { // 编辑用导出：网格加密，但总像素封顶（约 900 万），免得内存吃不消
-      const fine = Math.max(this.res / SOLID.fine, Math.sqrt((xmax - xmin) * (ymax - ymin) / 9e6), 0.025);
-      this.res = Math.min(this.res, fine);
-    }
     this.w = Math.ceil((xmax - xmin) / this.res);
     this.h = Math.ceil((ymax - ymin) / this.res);
     this.x0 = xmin; this.y0 = ymin;
@@ -384,7 +380,7 @@ export function trace(sp, f, tolPx = 0.3) {
     while (e !== undefined && !seen.has(e)) { seen.add(e); const p = pts.get(e); loop.push([p[0] - 1, p[1] - 1]); e = next.get(e); }
     if (loop.length >= 3) loops.push(loop);
   }
-  const minArea = Math.max(0.12 / (sp.res * sp.res), 2); // 去掉小于 ~0.12mm² 的噪点
+  const minArea = Math.max(0.12 / (sp.res * sp.res), 2 * (sp.k || 1) ** 2); // 去掉小于 ~0.12mm² 的噪点（加密描边时按原网格的 2 像素算）
   const outers = [], holes = [];
   for (let lp of loops) {
     lp = simplify(lp, tolPx);
@@ -406,6 +402,24 @@ export function trace(sp, f, tolPx = 0.3) {
 // ---------------------------------------------------------------------------
 //  分层挤出
 // ---------------------------------------------------------------------------
+/**
+ * 编辑用导出：把场双线性插值成 k 倍细的网格再描轮廓，边缘更圆滑。
+ * 注意只在描轮廓这一步加密——分层、清理细条这些都还在原来的网格上算，形状和网页里看到的一样。
+ */
+function upsample(sp, f, k) {
+  const w = sp.w * k, h = sp.h * k, out = new Float32Array(w * h);
+  for (let j = 0; j < h; j++) {
+    const v = Math.min(Math.max((j + 0.5) / k - 0.5, 0), sp.h - 1), y0 = Math.min(v | 0, sp.h - 2 < 0 ? 0 : sp.h - 2), ty = v - y0, y1 = Math.min(y0 + 1, sp.h - 1);
+    for (let i = 0; i < w; i++) {
+      const u = Math.min(Math.max((i + 0.5) / k - 0.5, 0), sp.w - 1), x0 = Math.min(u | 0, sp.w - 2 < 0 ? 0 : sp.w - 2), tx = u - x0, x1 = Math.min(x0 + 1, sp.w - 1);
+      const a = f[y0 * sp.w + x0], b = f[y0 * sp.w + x1], c = f[y1 * sp.w + x0], d = f[y1 * sp.w + x1];
+      out[j * w + i] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    }
+  }
+  const res = sp.res / k, x0 = sp.x0, y0 = sp.y0;
+  return [{ w, h, res, k, x0, y0, mm: (px, py) => [x0 + (px + 0.5) * res, y0 + (py + 0.5) * res] }, out];
+}
+
 /** features: [{f, z0, z1, op:'add'|'sub'}] → 一个 BufferGeometry（z 向上，y 已翻转为向上） */
 export function buildSolid(sp, features) {
   const zs = [...new Set(features.flatMap(ft => [ft.z0, ft.z1]).map(z => +z.toFixed(4)))].sort((a, b) => a - b);
@@ -425,7 +439,7 @@ export function buildSolid(sp, features) {
     let f = adds.length > 1 ? F.union(...adds) : adds[0];
     const subs = L.act.filter(a => a.op === 'sub').map(a => a.f);
     if (subs.length) f = F.sub(f, ...subs);
-    const polys = trace(sp, f);
+    const polys = SOLID.on && SOLID.fine > 1 ? trace(...upsample(sp, f, SOLID.fine), 0.2) : trace(sp, f);
     if (!polys.length) continue;
     if (SOLID.on) { // 编辑用：每层挤出成实体，最后做并集，层与层之间不留重叠面
       const cs = new W.CrossSection(polys.flatMap(p => [p.outer, ...p.holes]).map(lp => lp.map(([x, y]) => [x, -y])), 'EvenOdd');
