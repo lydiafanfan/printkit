@@ -2,9 +2,9 @@
  * 参数化零件（第二批）：线轴架、标签牌、侧插扣。
  * 直接用 manifold-3d 做实体建模 → 输出一定是封闭网格，尺寸就是参数本身。
  */
-import { Space, trace } from './engine.js?v=46';
-import { manifoldReady, geoFrom } from './joiner.js?v=46';
-import { getFit } from './parts.js?v=46';
+import { Space, trace } from './engine.js?v=51';
+import { manifoldReady, geoFrom } from './joiner.js?v=51';
+import { getFit } from './parts.js?v=51';
 
 let W = null;
 const init = async () => { W = await manifoldReady(); };

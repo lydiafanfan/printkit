@@ -1,16 +1,16 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=46';
-import { TOOLS } from './tools.js?v=46';
-import { SAMPLES } from './samples.js?v=46';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=46';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=46';
-import { getFit, setFit } from './parts.js?v=46';
-import { export3MF } from './export3mf.js?v=46';
-import { exportGLB } from './exportglb.js?v=46';
-import { SOLID, manifoldReady, solidMesh } from './solid.js?v=46';
-import { makeBatch } from './batch.js?v=46';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=46';
+import { Viewer, Thumbnailer } from './viewer.js?v=51';
+import { TOOLS } from './tools.js?v=51';
+import { SAMPLES } from './samples.js?v=51';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=51';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=51';
+import { getFit, setFit } from './parts.js?v=51';
+import { export3MF } from './export3mf.js?v=51';
+import { exportGLB } from './exportglb.js?v=51';
+import { SOLID, manifoldReady, solidMesh, sameSolid } from './solid.js?v=51';
+import { makeBatch } from './batch.js?v=51';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=51';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -964,16 +964,40 @@ const saveBlob = (data, type, file) => {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 };
+/** 在后台线程里重排三角面；jobs: [{pos, idx}] → 同样顺序的 [{pos, idx} | {error}] */
+function remeshInWorkers(jobs, L, onProgress) {
+  if (!jobs.length) return Promise.resolve([]);
+  const n = Math.max(1, Math.min(jobs.length, (navigator.hardwareConcurrency || 4) - 1, 4));
+  const out = new Array(jobs.length), order = jobs.map((j, i) => i).sort((a, b) => jobs[b].idx.length - jobs[a].idx.length); // 大的先做
+  let next = 0, done = 0;
+  return new Promise(resolve => {
+    for (let w = 0; w < n; w++) {
+      const worker = new Worker(new URL('./remesh-worker.js?v=51', import.meta.url), { type: 'module' });
+      const feed = () => {
+        if (next >= order.length) { worker.terminate(); return; }
+        const id = order[next++], j = jobs[id];
+        worker.postMessage({ id, pos: j.pos.slice(), idx: j.idx.slice(), L });
+      };
+      worker.onmessage = e => {
+        out[e.data.id] = e.data; done++;
+        onProgress?.(done, jobs.length);
+        if (done === jobs.length) { worker.terminate(); resolve(out); } else feed();
+      };
+      worker.onerror = e => { console.error(e); out.forEach((x, i) => { if (!x) out[i] = { error: 'worker' }; }); worker.terminate(); resolve(out); };
+      feed();
+    }
+  });
+}
 /** 编辑用（GLB）：重新生成一遍（描边加密），每个零件合成封闭实体 → { data, bad: [没合成的零件名], tris } */
-async function editablePack() {
+async function editablePack(L = 0) {
   const t = tool();
   await manifoldReady();
   let parts, res = null;
   if (t.kind === 'mesh') parts = lastResult?.exportParts ? lastResult.exportParts() : S.parts.map(p => ({ ...p, geo: p.geo.clone() }));
   else {
     const art = t.kind === 'heightmap' ? S.hmArt : t.kind === 'param' ? null : S.art;
-    SOLID.on = true; SOLID.fine = 2;
-    try { res = t.build(art, S.img, P()); } finally { SOLID.on = false; SOLID.fine = 1; }
+    SOLID.on = true; SOLID.fine = 2; SOLID.tol = L > 0 ? Math.min(0.06, Math.max(0.03, 0.05 * L)) : 0.03;
+    try { res = t.build(art, S.img, P()); } finally { SOLID.on = false; SOLID.fine = 1; SOLID.tol = 0.03; }
     parts = res.exportParts ? res.exportParts() : res.parts;
   }
   if (!res?.keepLayout) layoutParts(parts);
@@ -984,25 +1008,63 @@ async function editablePack() {
   const meshes = parts.map((p, i) => {
     const m = solidMesh(p.geo);
     if (!m.ok) bad.push(p.label || `零件 ${i + 1}`);
-    tris += m.idx.length / 3;
-    return { pos: m.pos, idx: m.idx, label: p.label || `零件 ${i + 1}`, color: colors[i] };
+    return { ...m, label: p.label || `零件 ${i + 1}`, color: colors[i] };
   });
+  if (L > 0) { // 平面里的三角形重排成均匀的（后台线程，几个零件同时做）；重排后不封闭或体积变了就用原来的
+    const jobs = meshes.filter(m => m.ok);
+    const out = await remeshInWorkers(jobs.map(m => ({ pos: m.pos, idx: m.idx })), L, (done, all) => toast(`正在重排三角面… ${done}/${all}`));
+    jobs.forEach((m, k) => {
+      const r = out[k];
+      if (r && !r.error && sameSolid(r.pos, r.idx, m.volume)) { m.pos = r.pos; m.idx = r.idx; }
+      else bad.push(`${m.label}（三角面没重排）`);
+    });
+  }
+  meshes.forEach(m => { tris += m.idx.length / 3; });
   parts.forEach(p => p.geo.dispose());
   if (res && parts !== res.parts) res.parts.forEach(p => p.geo.dispose());
   return { data: exportGLB(meshes), bad, tris };
+}
+// GLB：下载前选三角面大小（只重排平面里的三角形，形状不变）
+const GLB_SIZES = [
+  [0, '不重排', '面最少。平面里是又长又细的三角形，雕刻前最好先在软件里重建网格（Remesh）'],
+  [2, '2mm', '面比较少，雕刻、平滑的细节粗一点'],
+  [1, '1mm', '推荐：大多数相框、印章、钥匙扣都合适'],
+  [0.5, '0.5mm', '最细，面数大约是 1mm 的 4 倍；生成要多等十几秒，打开也会慢一点'],
+];
+S.glbL = LS.get('glbL', 1);
+function askGLB() {
+  return new Promise(resolve => {
+    const d = $('#modal');
+    if (!GLB_SIZES.some(o => o[0] === +S.glbL)) S.glbL = 1;
+    const render = () => {
+      d.innerHTML = `<div class="modal-in"><h3>导出 GLB（给 Blender / Nomad）</h3><div class="modal-body">
+        <p>每个零件是一个封闭实体，可以直接布尔运算。<b>三角面大小</b>：把平面里的三角形重排成差不多等边、这么大的，方便雕刻和平滑；棱角和轮廓上的点不动，形状和尺寸完全不变。</p>
+        <div class="seg glb-seg">${GLB_SIZES.map(([v, t]) => `<button data-l="${v}" class="${+S.glbL === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+        <p class="glb-est">${GLB_SIZES.find(o => o[0] === +S.glbL)[2]}</p>
+      </div><div class="modal-btns"><button class="btn-ghost" data-x>取消</button><button class="btn-primary" data-go>下载 GLB</button></div></div>`;
+      d.querySelectorAll('[data-l]').forEach(b => b.onclick = () => { S.glbL = +b.dataset.l; LS.set('glbL', S.glbL); render(); });
+      d.querySelector('[data-x]').onclick = () => { d.close(); resolve(null); };
+      d.querySelector('[data-go]').onclick = () => { d.close(); resolve(+S.glbL); };
+    };
+    render();
+    d.onclose = () => resolve(null); // Esc 关掉 = 取消（已经 resolve 过的不受影响）
+    d.showModal();
+  });
 }
 $('#download').addEventListener('click', async () => {
   if (!S.parts.length) return;
   const d = new Date();
   const name = `${tool().name}-${d.getMonth() + 1}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
   if (S.fmt === 'glb') {
+    const L = await askGLB();
+    if (L == null) return;
     const btns = [$('#download'), $('#fab')];
     btns.forEach(b => { b.disabled = true; }); $('#busy').classList.add('on');
     await new Promise(r => setTimeout(r, 40)); // 先让“生成中”显示出来
     try {
-      const { data, bad, tris } = await editablePack();
+      const { data, bad, tris } = await editablePack(L);
       saveBlob(data, 'model/gltf-binary', `${name}.glb`);
-      toast(bad.length ? `GLB 已下载，但「${bad.join('、')}」没能合成封闭实体，是按原样导出的` : `GLB 已下载（${Math.round(tris).toLocaleString()} 个三角面）：拖进 Blender 或 Nomad 就能改，1 单位 = 1mm`);
+      toast(bad.length ? `GLB 已下载，但「${bad.join('、')}」是按原样导出的` : `GLB 已下载（${Math.round(tris).toLocaleString()} 个三角面）：拖进 Blender 或 Nomad 就能改，1 单位 = 1mm`);
     } catch (err) {
       console.error(err);
       toast('没能生成 GLB：' + (err.message || err));

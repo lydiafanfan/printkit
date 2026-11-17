@@ -654,3 +654,11 @@ body { background: var(--bg); }
   .fmt button { padding: 6px 8px; }
   #viewTop, #viewFlip, .tb-group .tb-sep { display: none; }
 }
+
+/* GLB 导出对话框 */
+.glb-seg { margin: 10px 0 6px; }
+.glb-est { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.modal-btns { gap: 8px; }
+.btn-ghost { height: 38px; border: 0; border-radius: 10px; padding: 0 14px; background: var(--sunken); color: var(--ink2); font-weight: 600; font-size: 14.5px; }
+.btn-ghost:hover { color: var(--ink); }
+.modal .btn-primary { padding: 0 16px; }

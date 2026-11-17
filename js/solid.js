@@ -149,7 +149,7 @@ export function geoFrom(man) {
 //  打开 SOLID.on 后重新生成一遍：描轮廓时网格加密（fine 倍，只加密描边这一步，形状和网页里一样），每个零件的各层用布尔并集合成
 //  一个封闭、没有内部重叠面的实体——这样在 Blender 里布尔运算、在 Nomad 里重新拓扑和平滑都不会出错。
 // ---------------------------------------------------------------------------
-export const SOLID = { on: false, fine: 1 };
+export const SOLID = { on: false, fine: 1, tol: 0.03 }; // tol：描轮廓允许的误差（毫米）；要重排三角面时放宽一点，轮廓上的点不会挤成一堆
 
 /** 三角网格（可能是几块封闭体拼在一起）→ 一个 manifold；修不好返回 null */
 export function manOf(geo) {
@@ -196,4 +196,13 @@ export function solidMesh(geo) {
   const { verts, tris } = weld(g.attributes.position.array);
   if (g !== geo) g.dispose();
   return { pos: verts, idx: tris, ok: false };
+}
+
+/** 重排后的网格还是不是同一个封闭实体（体积差 < 0.05%） */
+export function sameSolid(pos, idx, volume) {
+  const m = toManifold(new Float32Array(pos), new Uint32Array(idx));
+  if (!m) return false;
+  const ok = Math.abs(m.volume() - volume) <= Math.max(1e-3, Math.abs(volume) * 5e-4);
+  m.delete();
+  return ok;
 }

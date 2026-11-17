@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { SOLID, W, geoFrom } from './solid.js?v=46';
+import { SOLID, W, geoFrom } from './solid.js?v=51';
 
 // ---------------------------------------------------------------------------
 //  毫米网格
@@ -439,7 +439,7 @@ export function buildSolid(sp, features) {
     let f = adds.length > 1 ? F.union(...adds) : adds[0];
     const subs = L.act.filter(a => a.op === 'sub').map(a => a.f);
     if (subs.length) f = F.sub(f, ...subs);
-    const polys = SOLID.on && SOLID.fine > 1 ? trace(...upsample(sp, f, SOLID.fine), 0.2) : trace(sp, f);
+    const polys = SOLID.on && SOLID.fine > 1 ? trace(...upsample(sp, f, SOLID.fine), (SOLID.tol || 0.03) / (sp.res / SOLID.fine)) : trace(sp, f);
     if (!polys.length) continue;
     if (SOLID.on) { // 编辑用：每层挤出成实体，最后做并集，层与层之间不留重叠面
       const cs = new W.CrossSection(polys.flatMap(p => [p.outer, ...p.holes]).map(lp => lp.map(([x, y]) => [x, -y])), 'EvenOdd');
