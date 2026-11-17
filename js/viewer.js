@@ -26,10 +26,7 @@ export class Viewer {
     const key = new THREE.DirectionalLight(0xffffff, 2.6); key.position.set(-70, -110, 120); this.scene.add(key);
     const rim = new THREE.DirectionalLight(0xfff1e0, 0.9); rim.position.set(150, 80, 60); this.scene.add(rim);
 
-    this.mats = [
-      new THREE.MeshStandardMaterial({ color: 0x8fd3c1, roughness: 0.55, metalness: 0 }),
-      new THREE.MeshStandardMaterial({ color: 0xf4c6b8, roughness: 0.55, metalness: 0 }),
-    ];
+    this.colorMats = new Map(); // 每种颜色一个材质
     this.group = new THREE.Group(); this.scene.add(this.group);
     this.plate = new THREE.Group(); this.scene.add(this.plate);
     this.shadow = this.makeShadow(); this.scene.add(this.shadow);
@@ -46,7 +43,19 @@ export class Viewer {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
   }
-  setColor(hex, hex2) { this.mats[0].color.set(hex); if (hex2) this.mats[1].color.set(hex2); }
+  matFor(hex) {
+    const k = String(hex).toLowerCase();
+    if (!this.colorMats.has(k)) {
+      if (this.colorMats.size > 60) { // 拖自定义颜色会产生很多种颜色：不再用的材质清掉
+        const used = new Set(this.group.children.map(m => m.material));
+        for (const [key, m] of this.colorMats) if (!used.has(m)) { m.dispose(); this.colorMats.delete(key); }
+      }
+      this.colorMats.set(k, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0 }));
+    }
+    return this.colorMats.get(k);
+  }
+  /** 只换颜色，不重建模型。colors: 每个零件的 #rrggbb，顺序和 setParts 的 parts 一样 */
+  setColors(colors) { this.group.children.forEach((m, i) => { if (colors[i]) m.material = this.matFor(colors[i]); }); }
   makeShadow() {
     const c = document.createElement('canvas'); c.width = c.height = 128;
     const g = c.getContext('2d'), grd = g.createRadialGradient(64, 64, 8, 64, 64, 64);
@@ -71,13 +80,11 @@ export class Viewer {
     const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xd3cec4 }));
     lines.position.z = -0.3; this.plate.add(lines);
   }
-  /** parts: [{geo, label}]；fit=true 时把镜头对准模型 */
-  setParts(parts, fit) {
+  /** parts: [{geo, label}]；colors: 每个零件的颜色；fit=true 时把镜头对准模型 */
+  setParts(parts, fit, colors = []) {
     this.group.clear();
-    this.colorMats ||= new Map();
-    const matFor = hex => { if (!this.colorMats.has(hex)) this.colorMats.set(hex, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0 })); return this.colorMats.get(hex); };
     parts.forEach((p, i) => {
-      const mesh = new THREE.Mesh(p.geo, p.color ? matFor(p.color) : this.mats[(p.second || p.translucent || (p.keepPlace && i > 0)) ? 1 : 0]);
+      const mesh = new THREE.Mesh(p.geo, this.matFor(colors[i] || p.color || '#8fd3c1'));
       if (p.offset) mesh.position.set(...p.offset); // 只影响预览（比如“分开查看”）
       this.group.add(mesh);
     });
@@ -110,6 +117,15 @@ export class Viewer {
     if (this.flipped) { this.group.rotation.y = Math.PI; this.group.position.z = box.max.z + box.min.z; }
   }
   top() { this.frame(undefined, new THREE.Vector3(0, -0.001, 1)); }
+  /** 刚打开一个工具：模型轻轻转一小段，让人看出这是能转的 3D 模型；一碰就停 */
+  intro() {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    clearTimeout(this.introTimer);
+    const c = this.controls, stop = () => { c.autoRotate = false; clearTimeout(this.introTimer); this.renderer.domElement.removeEventListener('pointerdown', stop); this.renderer.domElement.removeEventListener('wheel', stop); };
+    c.autoRotateSpeed = -5; c.autoRotate = true;
+    this.renderer.domElement.addEventListener('pointerdown', stop); this.renderer.domElement.addEventListener('wheel', stop, { passive: true });
+    this.introTimer = setTimeout(stop, 2200);
+  }
 }
 
 /** 离屏渲染缩略图（首页卡片用） */

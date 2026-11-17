@@ -8,8 +8,8 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { Space, F, distInside } from './engine.js?v=35';
-import { getFit } from './parts.js?v=35';
+import { Space, F, distInside } from './engine.js?v=42';
+import { getFit } from './parts.js?v=42';
 
 const MANIFOLD_URL = new URL('../vendor/manifold/manifold.js', import.meta.url).href; // 自带一份，不依赖外部 CDN
 let W = null;
@@ -432,6 +432,8 @@ export const JOINER = {
     { title: '预览', params: [{ k: 'explode', label: '分开查看', hint: '把零件拉开看连接件，不影响导出', type: 'range', min: 0, max: 1, step: 0.05 }] },
   ],
 
+  /** 在「颜色」里改了零件颜色：记到零件上，列表里的色点跟着变 */
+  onPartColor(label, hex) { const hit = JOIN.parts.filter(pt => pt.name === label); hit.forEach(pt => { pt.color = hex; }); return hit.length > 0; },
   async action(act, arg) {
     if (act === 'files') { const r = await loadFiles(arg); return r.problems.length ? { alert: problemAlert(r.problems, r.added) } : { toast: `已载入 ${r.added} 个零件` }; }
     if (act === 'sample') { await loadSample(arg); return {}; }

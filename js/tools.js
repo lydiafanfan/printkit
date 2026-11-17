@@ -1,10 +1,10 @@
 /* 打印助手 · 各个工具（参数定义 + 生成逻辑） */
 import * as THREE from 'three';
-import { FRAME_STUDIO } from './framestudio.js?v=35';
-import { PARTS, getFit } from './parts.js?v=35';
-import { JOINER } from './joiner.js?v=35';
-import { PARTS2 } from './parts2.js?v=35';
-import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=35';
+import { FRAME_STUDIO } from './framestudio.js?v=42';
+import { PARTS, getFit } from './parts.js?v=42';
+import { JOINER } from './joiner.js?v=42';
+import { PARTS2 } from './parts2.js?v=42';
+import { Space, F, dilate, erode, fillHoles, maxRadius, bounds, edgeAlong, centroid, rasterArt, buildSolid, distInside } from './engine.js?v=42';
 
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -146,7 +146,7 @@ export const TOOLS = [
         { k: 'size', label: '图案大小', hint: '图案最长的一边', type: 'range', min: 15, max: 90, step: 1, unit: 'mm' },
         { k: 'margin', label: '外圈宽度', type: 'range', min: 1, max: 8, step: 0.5, unit: 'mm' },
       ] },
-      { title: '图案', params: [
+      { title: '效果', params: [
         { k: 'style', label: '图案效果', type: 'seg', options: [['raise', '凸起'], ['engrave', '凹刻'], ['flush', '平面双色']] },
         { k: 'backT', label: '底板厚度', type: 'range', min: 1.2, max: 6, step: 0.2, unit: 'mm' },
         { k: 'relief', label: '图案高度', hint: '凸起高度 / 凹刻深度', type: 'range', min: 0.4, max: 3, step: 0.2, unit: 'mm', show: p => p.style !== 'flush' },

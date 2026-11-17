@@ -1,14 +1,14 @@
 /* 打印助手 · 界面逻辑 */
 import * as THREE from 'three';
-import { Viewer, Thumbnailer } from './viewer.js?v=35';
-import { TOOLS } from './tools.js?v=35';
-import { SAMPLES } from './samples.js?v=35';
-import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=35';
-import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=35';
-import { getFit, setFit } from './parts.js?v=35';
-import { export3MF } from './export3mf.js?v=35';
-import { makeBatch } from './batch.js?v=35';
-import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=35';
+import { Viewer, Thumbnailer } from './viewer.js?v=42';
+import { TOOLS } from './tools.js?v=42';
+import { SAMPLES } from './samples.js?v=42';
+import { artFromSVG, artFromFile, artFromText, layoutParts, exportSTL } from './engine.js?v=42';
+import { previewHM, levelLabels, isColorful, defaultHeights, sampleHeightmap } from './heightmap.js?v=42';
+import { getFit, setFit } from './parts.js?v=42';
+import { export3MF } from './export3mf.js?v=42';
+import { makeBatch } from './batch.js?v=42';
+import { estimate, MATERIALS, PATTERNS, EST_DEFAULT } from './estimate.js?v=42';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -58,6 +58,7 @@ const S = {
   text: LS.get('text', '小 雏 菊'),
   font: LS.get('font', 0),
   bold: LS.get('bold', true),
+  src: LS.get('src', {}),    // 每个工具各自记住用的是哪个示例 / 文字；上传的图片跨工具沿用
   art: null,
   hmArt: null,               // 相框工作室用的高度图
   parts: [],
@@ -65,7 +66,35 @@ const S = {
 if (!TOOLS.find(t => t.id === S.toolId)) S.toolId = 'stamp';
 const tool = () => TOOLS.find(t => t.id === S.toolId);
 const P = () => ({ ...tool().defaults, ...(S.params[S.toolId] || {}) });
-const setP = (k, v) => { (S.params[S.toolId] ||= {})[k] = v; LS.set('params', S.params); };
+const setP = (k, v) => { pushHist(k); (S.params[S.toolId] ||= {})[k] = v; LS.set('params', S.params); };
+// 撤销 / 重做：记下这个工具的参数和图像调整；连续拖同一个滑块只算一步
+const HIST = { undo: [], redo: [], last: null };
+const snap = () => JSON.stringify({ tool: S.toolId, params: S.params[S.toolId] || {}, img: S.img });
+function pushHist(key) {
+  const now = Date.now(), tag = S.toolId + ':' + key;
+  if (HIST.last && HIST.last.tag === tag && now - HIST.last.t < 1200) { HIST.last.t = now; return; }
+  HIST.last = { tag, t: now };
+  HIST.undo.push(snap()); if (HIST.undo.length > 60) HIST.undo.shift();
+  HIST.redo.length = 0; syncHist();
+}
+function stepHist(from, to) {
+  let i = from.length - 1;
+  while (i >= 0 && JSON.parse(from[i]).tool !== S.toolId) i--; // 只撤销当前工具的改动
+  if (i < 0) return false;
+  const st = JSON.parse(from.splice(i, 1)[0]);
+  to.push(snap()); HIST.last = null;
+  S.params[S.toolId] = st.params; LS.set('params', S.params);
+  S.img = st.img; LS.set('img', S.img);
+  renderPanel(); rebuild(); syncHist();
+  return true;
+}
+const undo = () => stepHist(HIST.undo, HIST.redo) ? toast('已撤销') : toast('没有可以撤销的了');
+const redo = () => stepHist(HIST.redo, HIST.undo) ? toast('已重做') : toast('没有可以重做的了');
+function syncHist() {
+  const has = a => a.some(x => JSON.parse(x).tool === S.toolId);
+  const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
+  if (u) u.disabled = !has(HIST.undo); if (r) r.disabled = !has(HIST.redo);
+}
 
 const sampleCache = new Map();
 function sampleArt(id) {
@@ -76,32 +105,65 @@ async function loadSample(id) {
   S.art = await sampleArt(id);
   S.source = 'sample'; S.sampleId = id;
 }
+const rememberSrc = v => { S.src[S.toolId] = v; LS.set('src', S.src); };
+/** 切换工具时：上传的图片接着用；示例和文字每个工具各记各的 */
+async function restoreSource(carried) {
+  const t = tool();
+  if (S.source === 'file' && S.art) { S.tab = 'upload'; if (carried) setTimeout(() => toast('沿用了刚才上传的图片，想换可以在「图案」里选'), 500); return; }
+  const m = S.src[t.id];
+  if (m?.mode === 'text') {
+    try { S.art = artFromText(S.text, FONTS[S.font][0], S.bold); S.source = 'text'; S.tab = 'text'; return; } catch { }
+  }
+  await loadSample(SAMPLES.some(x => x.id === m?.sampleId) ? m.sampleId : t.sample);
+  S.tab = 'sample';
+}
 
 // ---------- 3D 预览 ----------
 const viewer = new Viewer($('#viewport'));
-// ---------- 颜色面板（主色 + 第二色） ----------
-S.c1 = LS.get('c1', '#8fd3c1');
-S.c2 = LS.get('c2', '#f7f4ee');
+// ---------- 颜色：每个零件一种颜色（右侧面板里的「颜色」一组） ----------
+S.c1 = '#8fd3c1';                // 没有主题色的工具用的主色（每个工具默认用自己的主题色）
+S.c2 = LS.get('c2', '#f7f4ee');   // 默认第二色（纱层、双色零件的文字…）
+S.pc = LS.get('pc', {});          // 用户改过的颜色：{ 工具 id: { 零件名: '#rrggbb' } }
+S.pcOpen = null;                  // 正在展开调色板的零件名
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-function renderPalette() {
-  document.querySelectorAll('.cp-grid').forEach(g => {
-    const slot = g.dataset.slot, cur = S[slot], custom = !PALETTE.some(([c]) => same(c, cur));
-    g.innerHTML = PALETTE.map(([c, n]) => `<button style="--c:${c}" title="${n}" data-slot="${slot}" data-c="${c}" class="${same(c, cur) ? 'on' : ''}"></button>`).join('')
-      + `<label class="cp-custom ${custom ? 'on' : ''}" title="自定义颜色" style="${custom ? `--c:${cur}` : ''}"><input type="color" data-slot="${slot}" value="${cur}"><span>${custom ? '' : '+'}</span></label>`;
-  });
+const pcKey = p => p.label || '零件';
+const isSecond = (p, i) => !!(p.second || p.translucent || (p.keepPlace && i > 0));
+/** 每个零件的颜色：用户改过的 > 零件自带的（多色相框、拼接件）> 工具的主题色 / 第二色 */
+function partColors(parts = S.parts, toolId = S.toolId) {
+  const ov = S.pc[toolId] || {};
+  const main = META[toolId]?.hex || S.c1;
+  return parts.map((p, i) => ov[pcKey(p)] || p.color || (isSecond(p, i) ? S.c2 : main));
 }
-function applyColors() {
-  viewer.setColor(S.c1, S.c2);
-  $('#cpDot1').style.background = S.c1; $('#cpDot2').style.background = S.c2;
+function setPartColor(label, hex) {
+  if (label == null) return;
+  if (tool().onPartColor?.(label, hex)) { S.parts.forEach(p => { if (pcKey(p) === label) p.color = hex; }); refreshLive(); }
+  else { (S.pc[S.toolId] ||= {})[label] = hex; LS.set('pc', S.pc); }
+  viewer.setColors(partColors());
 }
-function setSlot(slot, c) { S[slot] = c; LS.set(slot, c); applyColors(); }
-applyColors(); renderPalette();
-$('#cpBtn').addEventListener('click', e => { e.stopPropagation(); const pop = $('#cpPop'); pop.hidden = !pop.hidden; $('#cpBtn').setAttribute('aria-expanded', !pop.hidden); if (!pop.hidden) renderPalette(); });
-$('#cpPop').addEventListener('click', e => { e.stopPropagation(); const b = e.target.closest('button[data-c]'); if (b) { setSlot(b.dataset.slot, b.dataset.c); renderPalette(); } });
-$('#cpPop').addEventListener('input', e => { if (e.target.type === 'color') { setSlot(e.target.dataset.slot, e.target.value); const l = e.target.closest('.cp-custom'); l.style.setProperty('--c', e.target.value); } });
-$('#cpPop').addEventListener('change', e => { if (e.target.type === 'color') renderPalette(); });
-addEventListener('click', e => { if (!e.target.closest('.color-pick')) { $('#cpPop').hidden = true; $('#cpBtn').setAttribute('aria-expanded', false); } });
+const colorName = c => PALETTE.find(([x]) => same(x, c))?.[1] || (same(c, META[S.toolId]?.hex) ? '默认色' : String(c).toUpperCase());
+function colorSecHTML() {
+  return sec('colors', '颜色', `<div class="pc-rows" id="pcRows"></div>
+    <p class="cp-note">颜色会写进 3MF，用 Bambu Studio 打开时每个零件已经分好色；实际颜色以你装的耗材为准。STL 不带颜色。</p>
+    <button class="link-btn" id="pcReset" hidden>恢复默认颜色</button>`, '<span class="sec-sum pc-dots" id="pcSum"></span>');
+}
+function renderColors() {
+  const box = $('#pcRows'); if (!box) return;
+  const cols = partColors(), groups = [];
+  S.parts.forEach((p, i) => { const k = pcKey(p); let g = groups.find(x => x.k === k); if (!g) groups.push(g = { k, n: 0, c: cols[i] }); g.n++; });
+  if (!groups.some(g => g.k === S.pcOpen)) S.pcOpen = null;
+  $('#pcSum').innerHTML = groups.slice(0, 8).map(g => `<i style="background:${g.c}"></i>`).join('');
+  $('#pcReset').hidden = !Object.keys(S.pc[S.toolId] || {}).length;
+  box.innerHTML = groups.map(g => {
+    const open = S.pcOpen === g.k, custom = !PALETTE.some(([c]) => same(c, g.c));
+    return `<div class="pc-item ${open ? 'open' : ''}">
+      <button class="pc-row" data-pc="${esc(g.k)}" aria-expanded="${open}"><i class="pc-sw" style="background:${g.c}"></i><span class="pc-name">${esc(g.k)}${g.n > 1 ? `<small>× ${g.n}</small>` : ''}</span><span class="pc-val">${esc(colorName(g.c))}</span>${CHEV}</button>
+      ${open ? `<div class="cp-grid">${PALETTE.map(([c, n]) => `<button style="--c:${c}" title="${n}" aria-label="${n}" data-pcc="${c}" class="${same(c, g.c) ? 'on' : ''}"></button>`).join('')}
+        <label class="cp-custom ${custom ? 'on' : ''}" title="自定义颜色" style="${custom ? `--c:${g.c}` : ''}"><input type="color" data-pcc-custom value="${g.c}"><span>${custom ? '' : '+'}</span></label></div>` : ''}</div>`;
+  }).join('') || '<p class="muted">模型生成后，在这里给每个零件选颜色。</p>';
+}
 $('#viewReset').onclick = () => viewer.frame();
+$('#undoBtn').onclick = () => undo();
+$('#redoBtn').onclick = () => redo();
 $('#viewFlip').onclick = () => { viewer.flip(); $('#viewFlip').classList.toggle('on', viewer.flipped); };
 window.printkit = { viewer, S }; // 方便调试
 $('#viewTop').onclick = () => viewer.top();
@@ -134,8 +196,9 @@ function renderBar() {
   const ico = $('#barIco'); ico.innerHTML = ICONS[t.id]; ico.style.setProperty('--tc', m.tc);
   $('#barName').textContent = t.name;
   $('#barSub').textContent = t.tagline;
+  $('#viewport').style.setProperty('--tc', m.tc || 'var(--t-sand)');
 }
-const navLink = (t, on) => `<a href="#/tool/${t.id}" class="${t.id === on ? 'on' : ''}"><span class="n-ico" style="--tc:${META[t.id]?.tc}">${ICONS[t.id]}</span>${t.name}${t.kind === 'heightmap' ? '<span class="badge">独立</span>' : ''}</a>`;
+const navLink = (t, on) => `<a href="#/tool/${t.id}" class="${t.id === on ? 'on' : ''}"><span class="n-ico" style="--tc:${META[t.id]?.tc}">${ICONS[t.id]}</span>${t.name}</a>`;
 function renderSide() {
   const on = location.hash.startsWith('#/tool/') ? S.toolId : null;
   $('#sideNav').innerHTML = `
@@ -154,36 +217,65 @@ $('#scrim').addEventListener('click', closeSide);
 $('#sideNav').addEventListener('click', e => { if (e.target.closest('a')) closeSide(); });
 
 // ---------- 首页 ----------
-const THUMB_V = 'thumb.v14.';
-const TILE_BG = { 'var(--t-mint)': '#dcf1e9', 'var(--t-peach)': '#fde4d8', 'var(--t-butter)': '#faefcc', 'var(--t-lilac)': '#ebe6fb', 'var(--t-sky)': '#dfecf8', 'var(--t-rose)': '#fbe1e9', 'var(--t-sand)': '#eee8de' };
+// ---------- 配色主题 ----------
+// 每套主题：7 种色块颜色 + 页面底色 / 面板色 / 文字色 / 强调色。模型默认色 = 色块颜色加深一档
+const THEMES = {
+  candy: { name: '糖果', tiles: { mint: '#3ed6b0', peach: '#ff8a65', butter: '#ffd23f', lilac: '#b197fc', sky: '#5ea8ff', rose: '#ff8fb8', sand: '#f7b77a' },
+    vars: { bg: '#ffffff', panel: '#f2f3f8', sunken: '#eef0f6', sunken2: '#e2e5ef', ink: '#14151a', ink2: '#494c59', muted: '#666a78', line: '#e4e7f0', line2: '#eceef5', accent: '#ff5a36', 'accent-soft': '#ffe6dc', 'accent-ink': '#c7361a' } },
+  berry: { name: '莓果', tiles: { mint: '#7fe0c2', peach: '#ffa07a', butter: '#ffd166', lilac: '#c9a0ff', sky: '#8ec5ff', rose: '#ff86b0', sand: '#f5b8a0' },
+    vars: { bg: '#fff4f7', panel: '#fce1ea', sunken: '#f9e3ea', sunken2: '#f5ccd9', ink: '#3a1731', ink2: '#6b4460', muted: '#825c76', line: '#f3d3de', line2: '#f8e2e9', accent: '#e0457b', 'accent-soft': '#fde0ea', 'accent-ink': '#b92c5e' } },
+  retro: { name: '复古', tiles: { mint: '#8dbf9a', peach: '#e8896a', butter: '#edbe4c', lilac: '#b58db6', sky: '#7fa3cf', rose: '#e79aa4', sand: '#d8b384' },
+    vars: { bg: '#fafbf9', panel: '#eceeea', sunken: '#e9ece7', sunken2: '#dadfd6', ink: '#20362b', ink2: '#4b5f52', muted: '#627367', line: '#dde1d9', line2: '#e7eae4', accent: '#e9692c', 'accent-soft': '#fbe2d2', 'accent-ink': '#b84a16' } },
+  soft: { name: '素雅', tiles: { mint: '#dcf1e9', peach: '#fde4d8', butter: '#faefcc', lilac: '#ebe6fb', sky: '#dfecf8', rose: '#fbe1e9', sand: '#eee8de' }, vars: {} },
+};
+const THEME_VARS = ['bg', 'panel', 'sunken', 'sunken2', 'ink', 'ink2', 'muted', 'line', 'line2', 'accent', 'accent-soft', 'accent-ink'];
+S.theme = THEMES[LS.get('theme', 'candy')] ? LS.get('theme', 'candy') : 'candy';
+Object.values(META).forEach(m => { m.hex0 = m.hex; m.tile = m.tc.match(/--t-(\w+)/)[1]; });
+const tileHex = id => THEMES[S.theme].tiles[META[id]?.tile] || '#efe9df';
+function applyTheme(id, redraw) {
+  S.theme = id; LS.set('theme', id);
+  const th = THEMES[id], st = document.documentElement.style;
+  THEME_VARS.forEach(k => th.vars[k] ? st.setProperty('--' + k, th.vars[k]) : st.removeProperty('--' + k));
+  Object.entries(th.tiles).forEach(([k, v]) => st.setProperty('--t-' + k, v));
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', th.vars.bg || '#ffffff');
+  Object.values(META).forEach(m => { m.hex = id === 'soft' ? m.hex0 : '#' + new THREE.Color(th.tiles[m.tile]).offsetHSL(0, -0.12, -0.11).getHexString(); });
+  document.querySelectorAll('#themePick button').forEach(b => b.classList.toggle('on', b.dataset.theme === id));
+  if (!redraw) return;
+  if ($('#home').hidden) { viewer.setColors(partColors()); renderColors(); } else { renderHome(); setTimeout(makeThumbs, 100); }
+}
+$('#themePick').innerHTML = Object.entries(THEMES).map(([id, t]) => `<button data-theme="${id}" title="${t.name}" aria-label="配色：${t.name}"><i style="background:${t.tiles.peach}"></i><i style="background:${t.tiles.butter}"></i><i style="background:${t.tiles.sky}"></i><span>${t.name}</span></button>`).join('');
+$('#themePick').addEventListener('click', e => { const b = e.target.closest('[data-theme]'); if (b) applyTheme(b.dataset.theme, true); });
+applyTheme(S.theme, false);
+
+// ---------- 首页 ----------
+const thumbKey = id => `thumb.v16.${S.theme}.${id}`;
 function renderHome() {
+  const SIZE = { stamp: 'lg', cookie: 'wide', framestudio: 'wide', tolerance: 'wide', joiner: 'wide' }; // 便当格：大小不一的格子
   const card = t => {
-    const m = META[t.id] || {}, url = LS.get(THUMB_V + t.id, null);
-    return `<a class="card-tool" href="#/tool/${t.id}" style="--tc:${m.tc}">
+    const m = META[t.id] || {}, url = LS.get(thumbKey(t.id), null);
+    return `<a class="card-tool ${SIZE[t.id] || ''}" href="#/tool/${t.id}" style="--tc:${m.tc}">
       <div class="art" data-thumb="${t.id}">${url ? `<img src="${url}" alt="">` : `<span class="ph">${ICONS[t.id]}</span>`}</div>
-      <div class="meta"><div><b>${t.name}</b><span>${t.tagline}</span></div>
-      <span class="go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div></a>`;
+      <div class="meta"><b>${t.name}</b><span>${t.tagline}</span></div>
+      <span class="go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>`;
   };
   const recent = LS.get('recent', []).map(id => TOOLS.find(t => t.id === id)).filter(Boolean).slice(0, 4);
   $('#home').innerHTML = `<div class="home-in">
-    <div class="h-head">
+    <div class="hero">
       <button class="tb-btn only-narrow" id="menuBtn2" aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-      <div><h1>今天做点什么？</h1><p>选一个工具，上传图片或调参数，导出 STL。</p></div>
+      <h1>把图案<br>变成<em>模型</em></h1>
+      <div class="hero-side">
+        <p>线稿、文字或几个尺寸，在浏览器里直接生成 3MF / STL，拖进切片软件就能打印。</p>
+        <ol class="steps"><li><b>1</b>选一个工具</li><li><b>2</b>上传图片或调参数</li><li><b>3</b>下载，开始打印</li></ol>
+      </div>
     </div>
     ${recent.length ? `<div class="recent"><span class="recent-label">最近使用</span>${recent.map(t => `<a href="#/tool/${t.id}"><span class="n-ico" style="--tc:${META[t.id]?.tc}">${ICONS[t.id]}</span>${t.name}</a>`).join('')}</div>` : ''}
     <section class="h-sec">
       <div class="h-sec-head"><h2>图案变模型</h2><span>从图片、线稿或文字生成</span></div>
-      <div class="grid">${IMG_TOOLS().map(card).join('')}</div>
+      <div class="grid bento">${IMG_TOOLS().map(card).join('')}</div>
     </section>
     <section class="h-sec">
-      <div class="h-sec-head"><h2>参数化零件</h2><span>调滑块生成尺寸精确的实用零件</span></div>
-      <div class="grid">${PART_TOOLS().map(card).join('')}</div>
-    </section>
-    <section class="h-sec">
-      <div class="h-sec-head"><h2>模型处理</h2><span>处理你已有的 STL 模型</span></div>
-      <div class="grid">${MESH_TOOLS().map(card).join('')}</div>
-      ${SOON.length ? `<div class="h-sec-head" style="margin-top:22px"><span>即将推出</span></div>` : ''}
-      <div class="grid soon">${SOON.map(z => `<div class="card-tool" style="--tc:${z.tc}"><div class="art"><span class="ph">${z.icon}</span></div><div class="meta"><div><b>${z.name}</b><span>${z.desc}</span></div></div></div>`).join('')}</div>
+      <div class="h-sec-head"><h2>零件和模型处理</h2><span>调滑块生成实用零件，或给已有的 STL 加连接件</span></div>
+      <div class="grid bento">${[...PART_TOOLS(), ...MESH_TOOLS()].map(card).join('')}</div>
     </section>
   </div>`;
   $('#menuBtn2')?.addEventListener('click', () => $('#side').classList.add('open'));
@@ -191,13 +283,14 @@ function renderHome() {
 
 // 首页卡片用真实的 3D 渲染图（第一次打开时生成，之后缓存）
 let thumbing = false;
-try { Object.keys(localStorage).filter(k => k.startsWith('printkit.thumb.') && !k.startsWith('printkit.' + THUMB_V)).forEach(k => localStorage.removeItem(k)); } catch { }
+try { Object.keys(localStorage).filter(k => k.startsWith('printkit.thumb.') && !k.startsWith('printkit.thumb.v16.')).forEach(k => localStorage.removeItem(k)); } catch { }
 async function makeThumbs() {
   if (thumbing) return; thumbing = true;
   let tn = null;
+  const theme = S.theme, key = id => `thumb.v16.${theme}.${id}`;
   try {
     for (const t of TOOLS) {
-      if (LS.get(THUMB_V + t.id, null)) continue;
+      if (LS.get(key(t.id), null)) continue;
       await new Promise(r => setTimeout(r, 40));
       try {
         if (t.kind === 'mesh') continue; // 需要用户的模型，首页不渲染缩略图
@@ -206,30 +299,30 @@ async function makeThumbs() {
         const res = t.build(art, { threshold: 0.5, invert: false, thicken: 0 }, { ...t.defaults });
         layoutParts(res.parts);
         tn ||= new Thumbnailer(480, 360);
-        const url = tn.render(t.kind === 'heightmap' ? res.parts.slice(0, 1) : res.parts, META[t.id]?.hex || '#8fd3c1', TILE_BG[META[t.id]?.tc] || '#efe9df');
+        const url = tn.render(t.kind === 'heightmap' ? res.parts.slice(0, 1) : res.parts, META[t.id]?.hex || '#8fd3c1', tileHex(t.id));
         res.parts.forEach(pt => pt.geo.dispose());
-        LS.set(THUMB_V + t.id, url);
-        const box = document.querySelector(`[data-thumb="${t.id}"]`);
-        if (box) box.innerHTML = `<img src="${url}" alt="">`;
+        if (theme !== S.theme) break; // 生成到一半换了配色：这一轮作废
+        LS.set(key(t.id), url);
+        document.querySelectorAll(`[data-thumb="${t.id}"]`).forEach(box => { const keep = box.querySelector('small'); box.innerHTML = `<img src="${url}" alt="">`; if (keep) box.appendChild(keep); });
       } catch (err) { console.warn('缩略图失败', t.id, err); }
     }
-  } finally { tn?.dispose(); thumbing = false; }
+  } finally { tn?.dispose(); thumbing = false; if (theme !== S.theme) setTimeout(makeThumbs, 50); }
 }
 
 // ---------- 路由 ----------
-let opened = false;
+let opened = false, introNext = false;
 async function openTool(id) {
   $('#home').hidden = true; $('#studio').hidden = false;
-  const changed = id !== S.toolId || !opened;
+  const changed = id !== S.toolId || !opened, carried = opened && id !== S.toolId;
   S.toolId = id; LS.set('tool', id);
   LS.set('recent', [id, ...LS.get('recent', []).filter(x => x !== id)].slice(0, 6));
   renderSide();
   if (changed) {
     if (tool().kind === 'heightmap') { if (!S.hmArt) S.hmArt = sampleHeightmap(); }
     else if (tool().init) { renderBar(); renderPanel(); $('#busy').classList.add('on'); try { await tool().init(); } catch (e) { showError('建模模块加载失败，请检查网络后刷新：' + e.message); } }
-    else if (tool().kind !== 'param' && (S.source === 'sample' || !S.art)) await loadSample(tool().sample);
+    else if (tool().kind !== 'param') await restoreSource(carried);
     opened = true;
-    renderBar(); renderPanel(); rebuild(true);
+    renderBar(); renderPanel(); rebuild(true); introNext = true; syncHist();
     window.scrollTo(0, 0); $('#panel').scrollTop = 0;
   }
   viewer.resize();
@@ -397,30 +490,79 @@ function setLevel(j, v) {
 }
 
 const CHEV = '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>';
-function closedSecs() { return new Set(LS.get('closed.' + S.toolId, [])); }
-function sec(id, title, body, extra = '') {
-  return `<section class="ins-sec ${closedSecs().has(id) ? 'closed' : ''}" data-sec="${id}">
-    <button class="sec-h" data-sec-toggle>${title}${extra}${CHEV}</button><div class="sec-b">${body}</div></section>`;
+// 分组开合：颜色、耗材估算、打印提示所有工具共用一个状态（后两个默认收起），其余默认展开、每个工具各记各的
+const SHARED_SECS = new Set(['colors', 'est', 'tips']), DEFAULT_CLOSED = new Set(['est', 'tips']);
+const secKey = id => 'secs.' + (SHARED_SECS.has(id) ? '_' : S.toolId);
+function secClosed(id) {
+  const v = LS.get(secKey(id), {})[id];
+  if (v !== undefined) return !v;
+  return DEFAULT_CLOSED.has(id) || LS.get('closed.' + S.toolId, []).includes(id); // 兼容旧版本记下的状态
 }
+function setSecOpen(id, open) { const m = LS.get(secKey(id), {}); m[id] = open; LS.set(secKey(id), m); }
+function sec(id, title, body, extra = '') {
+  return `<section class="ins-sec ${secClosed(id) ? 'closed' : ''}" data-sec="${id}" data-title="${esc(title)}">
+    <button class="sec-h" data-sec-toggle><span class="sec-t">${title}</span>${extra}${CHEV}</button><div class="sec-b">${body}</div></section>`;
+}
+// 不常动的参数：一组里有两个以上时收进组底部的「更多设置」，默认值就能直接打印
+const ADV = {
+  stamp: ['margin', 'base', 'borderW'],
+  extrude: ['margin'],
+  keychain: ['ring'],
+  cookie: ['wall', 'bladeH', 'flangeW', 'flangeT', 'plateT', 'edgeSkip'],
+  organza: ['inset', 'meshW', 'dotH'],
+  button: ['holeSpace', 'dishD', 'rimW', 'detailH'],
+  framestudio: ['smooth', 'gap', 'emptyT', 'invert', 'rotate', 'lip', 'wall', 'backT', 'rail', 'tol', 'magD', 'magT', 'loopD', 'tongueW', 'tongueL', 'tongueT', 'baseW', 'baseD', 'baseH'],
+  tolerance: ['plateT', 'chamfer'],
+  storage: ['divT', 'floor', 'lidT', 'footH'],
+  spoolrack: ['baseT'],
+  label: ['holeD', 'magD', 'magT'],
+  joiner: ['seatDepth'],
+};
+const moreOpen = () => new Set(LS.get('more.' + S.toolId, []));
 function groupsHTML(t, p) {
+  const adv = new Set(ADV[t.id] || []), opened = moreOpen();
   return t.groups.map(g => {
     const items = g.params.filter(c => !c.show || c.show(p));
-    return items.length ? sec('g-' + g.title, g.title, items.map(c => ctlHTML(c, p)).join('')) : '';
+    if (!items.length) return '';
+    const more = items.filter(c => adv.has(c.k)), main = items.filter(c => !adv.has(c.k));
+    if (!main.length || more.length < 2) return sec('g-' + g.title, g.title, items.map(c => ctlHTML(c, p)).join(''));
+    const changed = more.filter(c => p[c.k] !== t.defaults[c.k]).length;
+    return sec('g-' + g.title, g.title, main.map(c => ctlHTML(c, p)).join('')
+      + `<details class="more" data-more="${esc(g.title)}" ${opened.has(g.title) ? 'open' : ''}><summary>更多设置<em>${more.map(c => c.label).filter(Boolean).slice(0, 3).join('、')}</em>${changed ? `<i title="改过 ${changed} 项"></i>` : ''}</summary>${more.map(c => ctlHTML(c, p)).join('')}</details>`);
   }).join('');
 }
-const TIPS_SEC = () => estSecHTML() + sec('tips', '打印提示', '<ul class="tips" id="tips"></ul>');
+const TIPS_SEC = () => colorSecHTML() + estSecHTML() + sec('tips', '打印提示', '<ul class="tips" id="tips"></ul>', '<span class="sec-sum" id="tipsSum"></span>');
+/** 面板顶部的分组快捷跳转 */
+function navHTML() { return '<nav class="ins-nav" id="insNav"></nav>'; }
+function fillNav() {
+  const nav = $('#insNav'); if (!nav) return;
+  const short = { est: '耗材', tips: '提示' };
+  nav.innerHTML = [...document.querySelectorAll('#panel .ins-sec')].map(el => `<button data-jump="${esc(el.dataset.sec)}">${esc(short[el.dataset.sec] || el.dataset.title)}</button>`).join('');
+  spyNav();
+}
+function spyNav() {
+  const panel = $('#panel'), nav = $('#insNav'); if (!nav) return;
+  const top = panel.scrollTop + nav.offsetHeight + 24;
+  let cur = null;
+  panel.querySelectorAll('.ins-sec').forEach(el => { if (el.offsetTop <= top) cur = el.dataset.sec; });
+  if (panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 4) cur = panel.querySelector('.ins-sec:last-of-type')?.dataset.sec || cur;
+  nav.querySelectorAll('button').forEach(b => {
+    const on = b.dataset.jump === cur;
+    if (on && !b.classList.contains('on')) nav.scrollTo({ left: b.offsetLeft - nav.clientWidth / 2 + b.offsetWidth / 2, behavior: 'smooth' });
+    b.classList.toggle('on', on);
+  });
+}
+$('#panel').addEventListener('scroll', spyNav, { passive: true });
 const FOOT = `<div class="ins-foot"><span>双击滑块可恢复默认</span><button class="link-btn" id="resetTool">恢复默认参数</button></div>`;
 
 function renderPanel() {
+  $('#panel').innerHTML = navHTML() + panelHTML();
+  fillNav(); renderColors();
+}
+function panelHTML() {
   const t = tool(), p = P();
-  if (t.kind === 'heightmap') {
-    $('#panel').innerHTML = hmCardHTML(p) + groupsHTML(t, p) + TIPS_SEC() + FOOT;
-    return;
-  }
-  if (t.kind === 'param' || t.kind === 'mesh') {
-    $('#panel').innerHTML = groupsHTML(t, p) + TIPS_SEC() + FOOT;
-    return;
-  }
+  if (t.kind === 'heightmap') return hmCardHTML(p) + groupsHTML(t, p) + TIPS_SEC() + FOOT;
+  if (t.kind === 'param' || t.kind === 'mesh') return groupsHTML(t, p) + TIPS_SEC() + FOOT;
   const thumb = artThumb();
   const sourceLabel = S.source === 'sample' ? '示例图案' : S.source === 'text' ? '文字' : '上传的图片';
   const artBody = `
@@ -434,28 +576,37 @@ function renderPanel() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
         选择文件，或拖进窗口<small>SVG · PNG · JPG，白底黑线效果最好</small></button>` : ''}
     ${S.tab === 'text' ? `<textarea class="textarea" id="textIn" rows="2" placeholder="输入文字，可以换行">${esc(S.text)}</textarea>
-      <div class="fonts">${FONTS.map(([f, n], i) => `<button class="chip ${i === S.font ? 'on' : ''}" data-font="${i}" style="font-family:${esc(f)}">${n}</button>`).join('')}
-      <button class="chip ${S.bold ? 'on' : ''}" data-bold style="font-weight:700">粗体</button></div>` : ''}
-    ${S.tab === 'upload' ? batchBtnHTML() : ''}
-    ${S.art ? `<div class="current"><div class="thumb">${thumb ? `<img src="${thumb}" alt="">` : ''}</div><div class="meta"><b>${esc(S.art.label)}</b><span>${sourceLabel} · 深色部分变成实体</span></div></div>` : ''}
-    <div data-imgctl>${ctlHTML({ k: 'smooth', label: '平滑边缘', hint: '边缘毛躁、有锯齿时调大；太大会让细线变细', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' }, S.img)}
-      ${ctlHTML({ k: 'gap', label: '补小缝隙', hint: '线条没接上、有小缝或小断口时调大：比这个窄的缝都会补上；0 = 不补', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' }, S.img)}</div>
-    <details class="adv" ${LS.get('advOpen', false) ? 'open' : ''}>
-      <summary>图像调整</summary>
+      <div class="fonts">${FONTS.map(([f, n], i) => `<button class="chip ${i === S.font ? 'on' : ''}" data-font="${i}" style="font-family:${esc(f)}">${n}</button>`).join('')}</div>
+      <label class="ctl ctl-row bold-row"><span class="lbl">粗体</span><span class="switch"><input type="checkbox" data-bold ${S.bold ? 'checked' : ''}><i></i></span></label>` : ''}
+    ${batchBtnHTML()}
+    ${S.art ? `<div class="current"><div class="thumb">${thumb ? `<img src="${thumb}" alt="">` : ''}</div><div class="meta"><b>${esc(S.art.label)}</b><span data-src-label>${sourceLabel} · 深色部分变成实体</span></div></div>` : ''}
+    <details class="adv more" ${LS.get('advOpen', false) ? 'open' : ''}>
+      <summary>图像调整<em>边缘毛躁、线条断开、线太细时用</em>${imgChanged() ? '<i title="改过"></i>' : ''}</summary>
+      ${ctlHTML({ k: 'smooth', label: '平滑边缘', hint: '边缘毛躁、有锯齿时调大；太大会让细线变细', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' }, S.img)}
+      ${ctlHTML({ k: 'gap', label: '补小缝隙', hint: '线条没接上、有小缝或小断口时调大：比这个窄的缝都会补上；0 = 不补', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' }, S.img)}
       ${ctlHTML({ k: 'threshold', label: '阈值', hint: '越大只保留越深的线条', type: 'range', min: 0.1, max: 0.9, step: 0.05 }, S.img)}
       ${ctlHTML({ k: 'thicken', label: '线条加粗', hint: '线太细打印不出来时调大', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' }, S.img)}
       ${ctlHTML({ k: 'invert', label: '反相', hint: '白线黑底的图打开', type: 'toggle' }, S.img)}
     </details>`;
-  $('#panel').innerHTML = sec('art', '图案', artBody) + groupsHTML(t, p) + TIPS_SEC() + FOOT;
+  return sec('art', '图案', artBody) + groupsHTML(t, p) + TIPS_SEC() + FOOT;
 }
+const IMG_DEFAULT = { threshold: 0.5, thicken: 0, invert: false, smooth: 0, gap: 0.6 };
+const imgChanged = () => Object.entries(IMG_DEFAULT).some(([k, v]) => S.img[k] !== v);
 
 const imgKeys = new Set(['threshold', 'thicken', 'invert', 'smooth', 'gap']);
 function setValue(k, v, inImg) {
-  if (inImg) { S.img[k] = v; LS.set('img', S.img); } else setP(k, v);
+  if (inImg) { pushHist('img.' + k); S.img[k] = v; LS.set('img', S.img); } else setP(k, v);
 }
 
 $('#panel').addEventListener('input', e => {
   const t = e.target, k = t.dataset.k;
+  if (t.hasAttribute('data-pcc-custom')) { // 自定义颜色：拖动时只更新色块，松手后再重画
+    setPartColor(S.pcOpen, t.value);
+    const item = t.closest('.pc-item');
+    item.querySelector('.pc-sw').style.background = t.value; item.querySelector('.pc-val').textContent = t.value.toUpperCase();
+    t.closest('.cp-custom').style.setProperty('--c', t.value);
+    return;
+  }
   if (t.dataset.e) { estInput(t); return; }
   if (t.id === 'textIn') { S.text = t.value; LS.set('text', S.text); textChanged(); return; }
   if (t.dataset.level || t.dataset.levelNum) {
@@ -486,7 +637,9 @@ $('#panel').addEventListener('input', e => {
 });
 $('#panel').addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
+  if (t.hasAttribute('data-pcc-custom')) { renderColors(); return; }
   if (t.dataset.e) { estInput(t); return; }
+  if (t.hasAttribute('data-bold')) { S.bold = t.checked; LS.set('bold', S.bold); textChanged(true); return; }
   if (t.tagName === 'SELECT' && t.dataset.act) { runAct(t.dataset.act, { key: t.dataset.arg, value: t.value }); return; }
   if (!k) return;
   const inImg = imgKeys.has(k) && !!t.closest('details.adv, [data-imgctl]');
@@ -503,26 +656,38 @@ $('#panel').addEventListener('dblclick', e => {
   const t = e.target;
   if (!t.matches('input[type=range][data-k]')) return;
   const k = t.dataset.k, inImg = imgKeys.has(k) && !!t.closest('details.adv, [data-imgctl]');
-  const def = inImg ? { threshold: 0.5, thicken: 0, invert: false, smooth: 0, gap: 0.6 }[k] : tool().defaults[k];
+  const def = inImg ? IMG_DEFAULT[k] : tool().defaults[k];
   if (def === undefined) return;
   t.value = def; t.dispatchEvent(new Event('input', { bubbles: true }));
   toast('已恢复默认值');
 });
-$('#panel').addEventListener('toggle', e => { if (e.target.matches('details.adv')) LS.set('advOpen', e.target.open); }, true);
+$('#panel').addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.matches('details.adv')) LS.set('advOpen', d.open);
+  else if (d.matches('details.more')) { const set = moreOpen(); d.open ? set.add(d.dataset.more) : set.delete(d.dataset.more); LS.set('more.' + S.toolId, [...set]); }
+}, true);
 $('#panel').addEventListener('click', async e => {
   const b = e.target.closest('button');
   if (!b) return;
   if (b.dataset.act) { runAct(b.dataset.act, b.dataset.arg); return; }
+  if (b.dataset.pc !== undefined) { S.pcOpen = S.pcOpen === b.dataset.pc ? null : b.dataset.pc; renderColors(); return; }
+  if (b.dataset.pcc) { setPartColor(S.pcOpen, b.dataset.pcc); renderColors(); return; }
+  if (b.id === 'pcReset') { delete S.pc[S.toolId]; LS.set('pc', S.pc); viewer.setColors(partColors()); renderColors(); toast('已恢复默认颜色'); return; }
   if (b.dataset.fit) { setFit({ [b.dataset.fit]: +b.dataset.v }); refreshGroups(); toast(`已保存：${b.dataset.fit === 'slide' ? '滑动配合' : '紧配合'} ${b.dataset.v}mm`); rebuild(); return; }
   if (b.hasAttribute('data-sec-toggle')) {
-    const box = b.closest('.ins-sec'), id = box.dataset.sec, set = closedSecs();
+    const box = b.closest('.ins-sec');
     box.classList.toggle('closed');
-    box.classList.contains('closed') ? set.add(id) : set.delete(id);
-    LS.set('closed.' + S.toolId, [...set]);
+    setSecOpen(box.dataset.sec, !box.classList.contains('closed'));
+    spyNav();
+    return;
+  }
+  if (b.dataset.jump) {
+    const box = document.querySelector(`#panel .ins-sec[data-sec="${CSS.escape(b.dataset.jump)}"]`);
+    if (box) { if (box.classList.contains('closed')) { box.classList.remove('closed'); setSecOpen(box.dataset.sec, true); } box.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     return;
   }
   if (b.dataset.tab) { S.tab = b.dataset.tab; if (S.tab === 'text') { textChanged(true); } renderPanel(); return; }
-  if (b.dataset.sample) { await loadSample(b.dataset.sample); renderPanel(); rebuild(true); return; }
+  if (b.dataset.sample) { await loadSample(b.dataset.sample); rememberSrc({ mode: 'sample', sampleId: b.dataset.sample }); renderPanel(); rebuild(true); return; }
   if (b.id === 'pick') { $('#fileIn').click(); return; }
   if (b.dataset.e) { estInput(b); return; }
   if (b.id === 'estRec') { Object.assign(S.est, estRecommend().set); LS.set('est', S.est); refreshGroups(); toast('已换成推荐的填充和墙数'); return; }
@@ -534,11 +699,10 @@ $('#panel').addEventListener('click', async e => {
     return;
   }
   if (b.dataset.font) { S.font = +b.dataset.font; LS.set('font', S.font); textChanged(true); renderPanel(); return; }
-  if (b.hasAttribute('data-bold')) { S.bold = !S.bold; LS.set('bold', S.bold); textChanged(true); renderPanel(); return; }
   if (b.dataset.k && b.dataset.v !== undefined) { setP(b.dataset.k, b.dataset.v); refreshGroups(); rebuild(); return; }
-  if (b.id === 'resetTool') { delete S.params[S.toolId]; LS.set('params', S.params); renderPanel(); rebuild(true); toast('已恢复默认参数'); }
+  if (b.id === 'resetTool') { pushHist('reset'); HIST.last = null; delete S.params[S.toolId]; LS.set('params', S.params); renderPanel(); rebuild(true); toast('已恢复默认参数'); }
 });
-function refreshGroups() { const y = $('#panel').scrollTop; renderPanel(); $('#panel').scrollTop = y; showTips(lastResult); updateEst(); }
+function refreshGroups() { const y = $('#panel').scrollTop; renderPanel(); $('#panel').scrollTop = y; showTips(lastResult); updateEst(); spyNav(); }
 
 // ---------- 耗材估算 ----------
 S.est = { ...EST_DEFAULT, ...LS.get('est', {}) };
@@ -563,7 +727,7 @@ function estSecHTML() {
       <input id="r-est-infill" class="slider" type="range" data-e="infill" min="0" max="100" step="5" value="${e.infill}" style="--p:${pct}%"></div>
     <div class="ctl"><div class="ctl-top"><span class="lbl">墙层数<small>外壁一圈一圈的数量</small></span></div>
       <div class="seg">${[1, 2, 3, 4].map(n => `<button data-e="walls" data-v="${n}" class="${+e.walls === n ? 'on' : ''}">${n} 层</button>`).join('')}</div></div>
-    <div class="est-tip" id="estTip"></div>`);
+    <div class="est-tip" id="estTip"></div>`, '<span class="sec-sum" id="estSum"></span>');
 }
 function estInput(t) {
   const k = t.dataset.e;
@@ -585,12 +749,13 @@ function scheduleEst() { clearTimeout(estTimer); const g = $('#estG'); if (g && 
 function updateEst() {
   const g = $('#estG');
   if (!g) return;
-  if (!S.parts.length || !lastResult) { g.textContent = '—'; $('#estRows').innerHTML = ''; $('#estTip').innerHTML = ''; return; }
+  if (!S.parts.length || !lastResult) { g.textContent = '—'; $('#estRows').innerHTML = ''; $('#estTip').innerHTML = ''; $('#estSum').textContent = ''; return; }
   let r;
   try { r = estimate(S.parts, S.est); } catch (err) { console.error(err); $('#estSub').textContent = '这个模型算不了'; return; }
   const gs = v => v >= 100 ? Math.round(v) : (Math.round(v * 10) / 10).toFixed(1);
   const m = r.g / r.rho * 1000 / (Math.PI * 0.875 * 0.875) / 1000; // 1.75mm 耗材长度（米）
   g.textContent = `${gs(r.g)} g`;
+  $('#estSum').textContent = `${gs(r.g)} g · ${S.est.mat}`;
   $('#estSub').textContent = `约 ${m < 10 ? m.toFixed(1) : Math.round(m)} 米 ${S.est.mat} · 一卷 1kg 能打约 ${Math.max(1, Math.floor(1000 / r.g))} 个`;
   $('#estRows').innerHTML = r.rows.length > 1 ? r.rows.map(x => `<div><span>${esc(x.label)}</span><b>${gs(x.g)} g</b></div>`).join('') : '';
   const rec = estRecommend(), same = Object.entries(rec.set).every(([k, v]) => String(S.est[k]) === String(v));
@@ -609,9 +774,9 @@ function textChanged(now) {
   textTimer = setTimeout(() => {
     try {
       S.art = artFromText(S.text, FONTS[S.font][0], S.bold);
-      S.source = 'text';
-      const meta = document.querySelector('.current .meta b');
-      if (meta) { meta.textContent = S.art.label; updateThumb(); } else refreshGroups();
+      S.source = 'text'; rememberSrc({ mode: 'text' });
+      const meta = document.querySelector('.current .meta b'), lab = document.querySelector('[data-src-label]');
+      if (meta) { meta.textContent = S.art.label; if (lab) lab.textContent = '文字 · 深色部分变成实体'; updateThumb(); } else refreshGroups();
       rebuild(true);
     } catch (err) { showError(err.message); }
   }, now ? 0 : 350);
@@ -679,6 +844,7 @@ addEventListener('drop', e => {
 let buildTimer, lastResult = null, pendingFit = false;
 function rebuild(fit) {
   if (fit) pendingFit = true;
+  hideTipCard();
   clearTimeout(buildTimer);
   $('#busy').classList.add('on');
   buildTimer = setTimeout(doBuild, 160); // 不依赖 requestAnimationFrame，页面在后台也能生成
@@ -694,7 +860,8 @@ function doBuild() {
     else box = layoutParts(res.parts);
     S.parts.forEach(pt => pt.geo.dispose());
     S.parts = res.parts;
-    viewer.setParts(res.parts, pendingFit);
+    viewer.setParts(res.parts, pendingFit, partColors(res.parts));
+    if (introNext) { introNext = false; viewer.intro(); }
     pendingFit = false;
     // 多个零件时显示主零件尺寸；打印范围按最大的零件判断
     const sizes = res.parts.map(pt => pt.geo.boundingBox.getSize(new THREE.Vector3()));
@@ -707,7 +874,7 @@ function doBuild() {
     $('#exSub').textContent = `${res.parts.length > 1 ? `${res.parts[0].label} · 共 ${res.parts.length} 个零件 · ` : ''}${Math.round(tris).toLocaleString()} 个三角面`;
     $('#download').disabled = false; $('#fab').disabled = false;
     lastResult = { ...res, size: s };
-    document.querySelectorAll('[data-live]').forEach(el => { const c = t.groups.flatMap(g => g.params).find(x => x.k === el.dataset.live); if (c) el.innerHTML = c.render(P()); });
+    refreshLive(); renderColors();
     if (t.kind === 'param') { // 参数相关的说明随滑块实时更新
       const p = P();
       t.groups.flatMap(g => g.params).filter(c => c.type === 'info').forEach(c => { const el = document.querySelector(`[data-info="${c.k}"]`); if (el) el.innerHTML = c.render(p); });
@@ -725,6 +892,10 @@ function doBuild() {
     $('#busy').classList.remove('on');
   }
 }
+function refreshLive() {
+  const t = tool();
+  document.querySelectorAll('[data-live]').forEach(el => { const c = t.groups.flatMap(g => g.params).find(x => x.k === el.dataset.live); if (c) el.innerHTML = c.render(P()); });
+}
 function showTips(res) {
   const ul = $('#tips');
   if (!ul || !res) return;
@@ -737,13 +908,16 @@ function showTips(res) {
   ul.innerHTML = items.join('');
   const nWarn = items.filter(x => x.includes('class="warn"')).length;
   const w = $('#stWarn'); w.hidden = !nWarn; w.textContent = `${nWarn} 条提醒`;
+  const sum = $('#tipsSum');
+  if (sum) { sum.textContent = nWarn ? `${nWarn} 条提醒 · 共 ${items.length} 条` : items.length ? `${items.length} 条` : ''; sum.classList.toggle('warn', !!nWarn); }
 }
 $('#stWarn').addEventListener('click', () => {
-  const box = document.querySelector('[data-sec="tips"]');
-  if (!box) return;
-  box.classList.remove('closed');
-  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  box.classList.remove('flash'); void box.offsetWidth; box.classList.add('flash');
+  const card = $('#tipCard'), warns = [...document.querySelectorAll('#tips li.warn')].map(li => li.outerHTML).join('');
+  if (!warns) return;
+  if (!card.hidden && card.dataset.kind === 'warn') { hideTipCard(); return; }
+  card.dataset.kind = 'warn';
+  card.innerHTML = `<div class="tc-h"><b>需要留意</b><button class="tc-x" data-tc="close" aria-label="关闭">×</button></div><ul class="tips">${warns}</ul>`;
+  card.hidden = false;
 });
 function showError(msg) { const el = $('#vpError'); el.innerHTML = `<b>没法生成</b>${esc(msg)}`; el.hidden = false; }
 function hideError() { $('#vpError').hidden = true; }
@@ -757,14 +931,11 @@ function renderFmt() {
 }
 renderFmt();
 $('#fmtSeg').addEventListener('click', e => { const b = e.target.closest('[data-fmt]'); if (!b) return; S.fmt = b.dataset.fmt; LS.set('fmt', S.fmt); renderFmt(); });
-function partColors(parts = S.parts) {
-  return parts.map((p, i) => p.color || ((p.second || p.translucent || (p.keepPlace && i > 0)) ? S.c2 : S.c1));
-}
 /** 生成结果 → 文件数据（3MF / STL）。下载和批量生成共用 */
-function exportPack(res, fmt = S.fmt) {
+function exportPack(res, fmt = S.fmt, toolId = S.toolId) {
   if (!res.keepLayout) layoutParts(res.parts);
-  let parts = res.parts, colors = partColors(res.parts);
-  if (res.exportParts) { parts = res.exportParts(); layoutParts(parts); colors = parts.map((_, i) => res.parts[i]?.color || colors[0]); }
+  let parts = res.parts, colors = partColors(res.parts, toolId);
+  if (res.exportParts) { const base = colors; parts = res.exportParts(); layoutParts(parts); colors = parts.map((_, i) => res.parts[i]?.color ? base[i] : base[0]); }
   const data = fmt === '3mf' ? export3MF(parts, colors) : exportSTL(parts);
   if (parts !== res.parts) parts.forEach(pt => pt.geo.dispose());
   return { data, ext: fmt };
@@ -790,6 +961,21 @@ $('#download').addEventListener('click', () => {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
   toast(is3mf ? '3MF 已下载，拖进 Bambu Studio 就能打印' : 'STL 已下载，拖进切片软件就能打印');
+  showTipCard();
+});
+// 下载后把「打印提示」直接显示在画布上（面板里那一组默认是收起的）
+function showTipCard() {
+  const card = $('#tipCard'), tips = $('#tips')?.innerHTML;
+  if (!tips || LS.get('tipCardOff', false)) return;
+  card.dataset.kind = 'tips';
+  card.innerHTML = `<div class="tc-h"><b>打印前看一眼</b><button class="tc-x" data-tc="close" aria-label="关闭">×</button></div><ul class="tips">${tips}</ul><button class="link-btn" data-tc="off">以后不再弹出</button>`;
+  card.hidden = false;
+}
+const hideTipCard = () => { $('#tipCard').hidden = true; };
+$('#tipCard').addEventListener('click', e => {
+  const b = e.target.closest('[data-tc]'); if (!b) return;
+  if (b.dataset.tc === 'off') { LS.set('tipCardOff', true); toast('好的。提示还在右边面板最下面的「打印提示」里'); }
+  hideTipCard();
 });
 
 // ---------- 快捷键 ----------
@@ -797,8 +983,10 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 $('#kbdSave').textContent = isMac ? '⌘S' : 'Ctrl+S';
 addEventListener('keydown', e => {
   if ($('#studio').hidden) return;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.target.closest?.('textarea, input[type=text]')) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y' && !e.target.closest?.('textarea, input[type=text]')) { e.preventDefault(); redo(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (!$('#download').disabled) $('#download').click(); return; }
-  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input, textarea, select')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input, textarea, select')) return;
   const k = e.key.toLowerCase();
   if (k === 'f') $('#viewReset').click();
   else if (k === 't') $('#viewTop').click();

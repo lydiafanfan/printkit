@@ -6,9 +6,9 @@
  * 底座是单独零件：相框底部多出一块插片，插进底座里带后仰角度的槽。
  */
 import * as THREE from 'three';
-import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=35';
-import { getFit } from './parts.js?v=35';
-import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=35';
+import { Space, F, erode, dilate, edgeAlong, buildSolid, blurField } from './engine.js?v=42';
+import { getFit } from './parts.js?v=42';
+import { rotateArt, analyzeHM, rasterBright, bandField, defaultHeights, prepBg, colorLevels, levelLabels } from './heightmap.js?v=42';
 
 const r1 = v => Math.round(v * 10) / 10;
 const PHOTOS = { instaxMini: [54, 86], instaxSq: [72, 86], instaxWide: [108, 86], r3: [89, 127], r4: [102, 152], r5: [127, 178], sq: [100, 100] };
@@ -29,7 +29,7 @@ const STAND_ICONS = {
 
 export const FRAME_STUDIO = {
   id: 'framestudio', name: '相框工作室', kind: 'heightmap',
-  tagline: '上传高度图：白色最高、灰色次高、黑色或透明为空，中间留好相片窗口',
+  tagline: '把图片做成浮雕相框：可分层、多色，带背面夹层、挂孔和底座',
   defaults: {
     bgAuto: true, winMode: 'auto', winBox: null, winShape: 'round', winR: 3,
     rotate: 0, invert: false, emptyT: 0.12, smooth: 0, gap: 0.6, hmode: 'levels', split: 'lum', ams: 'on', amsBase: 1.2, flatH: 4, levelH: [], maxH: 6, minH: 3,

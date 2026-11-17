@@ -9,9 +9,9 @@
  * 打开“自动生成”后，网页开着时每隔几秒看一次文件夹，没生成过的照片自动生成；
  * 已经生成过的不会自己重新生成（除非照片换了新的），要用新参数重做就点“全部重新生成”。
  */
-import { artFromFile } from './engine.js?v=35';
-import { previewHM } from './heightmap.js?v=35';
-import { estimate } from './estimate.js?v=35';
+import { artFromFile } from './engine.js?v=42';
+import { previewHM } from './heightmap.js?v=42';
+import { estimate } from './estimate.js?v=42';
 import { zipSync, strToU8 } from 'three/addons/libs/fflate.module.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -180,7 +180,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
         ${B.dir ? `${ready && !B.running ? '<button class="link-btn" data-b="regen">用现在的参数全部重新生成</button>' : ''}
         <button class="btn-primary" data-b="runDir" ${!fresh || B.running ? 'disabled' : ''}>${fresh ? `生成 ${fresh} 个到「${OUT}/${esc(t.name)}」` : '都生成好了'}</button>`
         : `${its.length && !B.running ? '<button class="link-btn" data-b="clear">全部清空</button>' : ''}
-        <button class="btn-primary" data-b="run" ${!ready || loading || B.running ? 'disabled' : ''}>生成 ${ready} 个 ${ext}，下载 zip</button>`}
+        <button class="btn-primary" data-b="run" ${!ready || loading || B.running ? 'disabled' : ''}>${ready ? `生成 ${ready} 个 ${ext}，下载 zip` : '先添加图片'}</button>`}
       </div></div>`;
     const g2 = dlg.querySelector('.bt-grid'); if (g2) g2.scrollTop = y;
   }
@@ -320,7 +320,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
       await tick();
       try {
         const res = t.build(await artFromFile(await fileOf(it)), S.img, itemP(it));
-        const { data, ext } = exportPack(res, fmt);
+        const { data, ext } = exportPack(res, fmt, t.id);
         let est = null;
         try { est = estimate(res.parts, S.est); } catch { }
         res.parts.forEach(p => p.geo.dispose());
@@ -398,7 +398,7 @@ export function makeBatch({ S, getTool, getP, toast, exportPack, thumbOf, onStat
       try {
         const art = await artFromFile(await fileOf(it));
         const res = t.build(art, S.img, itemP(it));
-        const { data, ext } = exportPack(res, fmt);
+        const { data, ext } = exportPack(res, fmt, t.id);
         let est = null;
         try { est = estimate(res.parts, S.est); } catch { }
         res.parts.forEach(pt => pt.geo.dispose());
